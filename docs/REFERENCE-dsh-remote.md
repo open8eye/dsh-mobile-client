@@ -1,5 +1,15 @@
 # DSH Remote 项目总结（含可迁移经验）
 
+> ### ⚠️ 本文写的不是 DSH Mobile Client
+>
+> 「**DSH Remote**」是先行项目
+> [dsh-mobile-app](https://github.com/hongshuxifan321/dsh-mobile-app)（hongshuxifan321）的名字。
+> 本文是**它**的技术总结，收录在本仓库里，是因为其中关于
+> 「密码认证代理 + 免费隧道 + 客户端只做三件事」的问题模型、可复用的架构模式与踩坑清单，
+> 直接影响了 DSH Mobile Client 的设计取舍。
+>
+> 本项目的架构说明请看 [ARCHITECTURE.md](ARCHITECTURE.md)。
+
 > **文档定位**：本文既是本项目的技术总结，也是一份**可迁移到其他项目**的参考——
 > 抽取了通用问题模型、可复用的架构模式与技巧、以及踩坑清单。
 >

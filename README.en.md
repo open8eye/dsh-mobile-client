@@ -250,7 +250,8 @@ Every hard part of this project belongs to the projects below. **None of this ex
 - **[dsh-mobile-app / DSH Remote](https://github.com/hongshuxifan321/dsh-mobile-app)** (hongshuxifan321) —
   the prior art that proved out "phone shell + scan to connect + encrypted credentials", and
   whose write-up directly shaped this project's decisions (notably never falling back to a
-  cleartext credential).
+  cleartext credential). That write-up is kept at
+  [docs/REFERENCE-dsh-remote.md](docs/REFERENCE-dsh-remote.md).
 - **[dsh-web-mobile](https://github.com/mexiaosqwq/dsh-web-mobile)** (mexiaosqwq, MIT) —
   the mobile layout adaptation, carried over by dsh-pocket.
 - **[cloudflared](https://github.com/cloudflare/cloudflared)** — the public tunnel.

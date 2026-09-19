@@ -286,7 +286,8 @@ app/lib/
   本 App 的自动重新登录正是建立在它的 `?token=` 语义之上。
 - **[dsh-mobile-app / DSH Remote](https://github.com/hongshuxifan321/dsh-mobile-app)**（hongshuxifan321）——
   把「手机壳 + 扫码连接 + 凭证加密存储」这条路走通的先行项目，
-  本项目的许多设计取舍（尤其是凭证加密「失败不回退明文」）直接受益于它的总结。
+  本项目的许多设计取舍（尤其是凭证加密「失败不回退明文」）直接受益于它的总结，
+  该总结收录于 [docs/REFERENCE-dsh-remote.md](docs/REFERENCE-dsh-remote.md)。
 - **[dsh-web-mobile](https://github.com/mexiaosqwq/dsh-web-mobile)**（mexiaosqwq，MIT）——
   移动端布局适配，经 dsh-pocket 移植。
 - **[cloudflared](https://github.com/cloudflare/cloudflared)** —— 公网隧道。
