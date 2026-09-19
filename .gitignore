@@ -1,0 +1,40 @@
+# --- Local build tooling ---------------------------------------------------
+# A private copy of the Flutter SDK, a JDK and the pub cache live here so the
+# build does not depend on anything outside the checkout. They are multi-
+# gigabyte and must never be committed.
+.tooling/
+.recon/
+
+# --- Flutter / Dart --------------------------------------------------------
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/build/
+app/ios/Pods/
+app/ios/.symlinks/
+app/ios/Flutter/Flutter.framework
+app/ios/Flutter/Flutter.podspec
+app/ios/Flutter/ephemeral/
+app/android/.gradle/
+# The Android root project's own build dir (reports, intermediates); the Flutter
+# one is app/build/ and is covered above.
+app/android/build/
+app/android/local.properties
+app/android/app/debug/
+app/android/app/profile/
+app/android/app/release/
+app/android/key.properties
+*.jks
+*.keystore
+
+# --- Editors / OS ----------------------------------------------------------
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# --- Release artefacts -----------------------------------------------------
+*.apk
+*.aab
+dist/

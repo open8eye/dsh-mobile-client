@@ -1,0 +1,215 @@
+import 'package:flutter/foundation.dart';
+import 'package:uuid/uuid.dart';
+
+import '../dsh/dsh_endpoint.dart';
+import '../models/dsh_device.dart';
+import '../storage/device_repository.dart';
+import '../storage/secret_store.dart';
+
+/// Owns the saved device list, the active device, and the password keystore.
+///
+/// Passwords are never cached in this object: every read goes to the platform
+/// keystore so a memory dump or a crash report cannot leak them.
+class DeviceController extends ChangeNotifier {
+  DeviceController({
+    required DeviceRepository repository,
+    required SecretStore secrets,
+    Uuid? uuid,
+  })  : _repository = repository,
+        _secrets = secrets,
+        _uuid = uuid ?? const Uuid();
+
+  final DeviceRepository _repository;
+  final SecretStore _secrets;
+  final Uuid _uuid;
+
+  final List<DshDevice> _devices = <DshDevice>[];
+  String? _activeDeviceId;
+  bool _loaded = false;
+
+  List<DshDevice> get devices => List<DshDevice>.unmodifiable(_devices);
+
+  bool get loaded => _loaded;
+
+  bool get isEmpty => _devices.isEmpty;
+
+  String? get activeDeviceId => _activeDeviceId;
+
+  DshDevice? get activeDevice {
+    final id = _activeDeviceId;
+    if (id == null) return null;
+    for (final device in _devices) {
+      if (device.id == id) return device;
+    }
+    return null;
+  }
+
+  DshDevice? byId(String id) {
+    for (final device in _devices) {
+      if (device.id == id) return device;
+    }
+    return null;
+  }
+
+  Future<void> load({String? initialActiveDeviceId}) async {
+    final loaded = await _repository.load();
+    _devices
+      ..clear()
+      ..addAll(loaded);
+    _activeDeviceId = initialActiveDeviceId;
+    if (_activeDeviceId != null && byId(_activeDeviceId!) == null) {
+      _activeDeviceId = _devices.isEmpty ? null : _devices.first.id;
+    }
+    _loaded = true;
+    notifyListeners();
+  }
+
+  Future<String?> passwordFor(String deviceId) => _secrets.readPassword(deviceId);
+
+  /// Save (or clear) the access password for [deviceId].
+  ///
+  /// Returns an error message when the keystore rejected the write, so the UI
+  /// can say so instead of silently losing the password.
+  Future<String?> setPassword(String deviceId, String? password) async {
+    try {
+      await _secrets.writePassword(deviceId, password);
+    } on SecretStoreException {
+      return 'keystore';
+    }
+    _replace(byId(deviceId)?.copyWith(hasPassword: password != null && password.isNotEmpty));
+    await _persist();
+    return null;
+  }
+
+  /// Add a device from a scanned or typed endpoint.
+  ///
+  /// Re-adding an address that already exists updates that entry instead of
+  /// creating a duplicate, which is what a second scan of the same QR code
+  /// should do.
+  Future<DshDevice> addFromEndpoint(
+    DshEndpoint endpoint, {
+    String? name,
+    String? password,
+  }) async {
+    final existing = _findByBaseUrl(endpoint.baseUrl);
+    final resolvedName = (name != null && name.trim().isNotEmpty)
+        ? name.trim()
+        : (existing?.name ?? DshDevice.defaultNameFor(endpoint.host, endpoint.kind));
+
+    final providedPassword = password != null && password.isNotEmpty;
+    // Scanning a QR code again must not silently drop a password the user
+    // already stored for this address.
+    final hasPassword = providedPassword || (existing?.hasPassword ?? false);
+
+    final device = DshDevice(
+      id: existing?.id ?? _uuid.v4(),
+      name: resolvedName,
+      baseUrl: endpoint.baseUrl,
+      kind: endpoint.kind,
+      hasPassword: hasPassword,
+      lastConnectedAt: existing?.lastConnectedAt,
+      createdAt: existing?.createdAt ?? DateTime.now(),
+    );
+
+    if (providedPassword) {
+      await _secrets.writePassword(device.id, password);
+    }
+
+    if (existing == null) {
+      _devices.add(device);
+    } else {
+      _replace(device);
+    }
+    _activeDeviceId = device.id;
+    await _persist();
+    return device;
+  }
+
+  Future<void> rename(String deviceId, String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    _replace(byId(deviceId)?.copyWith(name: trimmed));
+    await _persist();
+  }
+
+  /// Change a device's address and/or password from the edit screen.
+  Future<String?> updateDevice(
+    String deviceId, {
+    required DshEndpoint endpoint,
+    required String name,
+    String? password,
+    required bool passwordChanged,
+  }) async {
+    final existing = byId(deviceId);
+    if (existing == null) return null;
+    var hasPassword = existing.hasPassword;
+    if (passwordChanged) {
+      final failure = await setPassword(deviceId, password);
+      if (failure != null) return failure;
+      hasPassword = password != null && password.isNotEmpty;
+    }
+    _replace(existing.copyWith(
+      name: name.trim().isEmpty ? existing.name : name.trim(),
+      baseUrl: endpoint.baseUrl,
+      kind: endpoint.kind,
+      hasPassword: hasPassword,
+    ));
+    await _persist();
+    return null;
+  }
+
+  Future<void> remove(String deviceId) async {
+    _devices.removeWhere((device) => device.id == deviceId);
+    await _secrets.writePassword(deviceId, null);
+    if (_activeDeviceId == deviceId) {
+      _activeDeviceId = _devices.isEmpty ? null : _devices.first.id;
+    }
+    await _persist();
+  }
+
+  Future<void> setActive(String? deviceId) async {
+    if (deviceId != null && byId(deviceId) == null) return;
+    _activeDeviceId = deviceId;
+    notifyListeners();
+  }
+
+  Future<void> markConnected(String deviceId) async {
+    final device = byId(deviceId);
+    if (device == null) return;
+    _replace(device.copyWith(lastConnectedAt: DateTime.now()));
+    await _persist();
+  }
+
+  /// Forget every stored password while keeping the device list.
+  Future<void> clearAllPasswords() async {
+    for (var index = 0; index < _devices.length; index++) {
+      final device = _devices[index];
+      await _secrets.writePassword(device.id, null);
+      _devices[index] = device.copyWith(hasPassword: false);
+    }
+    await _persist();
+  }
+
+  DshDevice? _findByBaseUrl(String baseUrl) {
+    for (final device in _devices) {
+      if (device.baseUrl == baseUrl) return device;
+    }
+    return null;
+  }
+
+  void _replace(DshDevice? device) {
+    if (device == null) return;
+    final index = _devices.indexWhere((entry) => entry.id == device.id);
+    if (index == -1) {
+      _devices.add(device);
+    } else {
+      _devices[index] = device;
+    }
+    notifyListeners();
+  }
+
+  Future<void> _persist() async {
+    notifyListeners();
+    await _repository.save(_devices);
+  }
+}

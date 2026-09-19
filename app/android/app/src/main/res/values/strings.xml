@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DSH Mobile</string>
+    <!-- Shown in the notification that keeps the companion alive. -->
+    <string name="pet_channel_name">桌面伙伴</string>
+    <string name="pet_channel_description">在桌面上显示 DSH 伙伴</string>
+    <string name="pet_notification_title">DSH 伙伴正在桌面上</string>
+    <string name="pet_notification_text">点按返回 DSH Mobile</string>
+</resources>

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DSH Pocket serves the phone over plain HTTP on the LAN
+  (for example `http://192.168.1.5:3081`), because a home server has no
+  certificate for a private address. Android 9+ blocks cleartext by default, so
+  without this the LAN entry point cannot be reached at all.
+
+  Android's network security config matches *host names*, not CIDR ranges, and
+  the LAN address is whatever the router handed out — so there is no narrower
+  way to express "any private address". Cleartext is therefore permitted
+  app-wide, which is the honest trade-off for a client whose whole purpose is
+  reaching a user-specified home server. The public tunnel entry point is
+  always HTTPS and is unaffected by this setting.
+
+  User-installed CAs are trusted because home servers and NAS boxes routinely
+  present a self-signed certificate.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
