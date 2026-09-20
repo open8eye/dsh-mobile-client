@@ -27,6 +27,18 @@ app/android/key.properties
 *.jks
 *.keystore
 
+# --- Credentials -----------------------------------------------------------
+# Nothing here should ever exist: tokens belong in ~/.git-credentials (from
+# `credential.helper store`) or in GitHub's Actions secrets, both of which
+# live outside the checkout. These lines are so that a copy pasted in by
+# accident does not get committed — the repositories are public, and a
+# token that reaches a commit is a token that has to be revoked.
+.git-credentials
+.netrc
+.env
+*.token
+*.secret
+
 # --- Python tooling --------------------------------------------------------
 __pycache__/
 *.pyc
