@@ -188,6 +188,12 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
             onChanged: settings.setAutoReconnect,
           ),
           SwitchListTile(
+            title: Text(context.tr('settingsSkipOnboarding')),
+            subtitle: Text(context.tr('settingsSkipOnboardingHint')),
+            value: current.skipDshOnboarding,
+            onChanged: settings.setSkipDshOnboarding,
+          ),
+          SwitchListTile(
             title: Text(context.tr('settingsAutoOpen')),
             value: current.autoOpenLastDevice,
             onChanged: settings.setAutoOpenLastDevice,

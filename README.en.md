@@ -1,7 +1,7 @@
 <h1 align="center">DSH Mobile Client</h1>
 
 <p align="center">
-  <strong>Your computer's DeepSeek Harness, in your pocket: one app, scan to connect, no password typing.</strong>
+  <strong>A phone app for the DeepSeek Harness already running on your computer: scan to connect, no password typing.</strong>
 </p>
 
 <p align="center">
@@ -22,6 +22,20 @@
 [Open DeepSeek Harness Desktop](https://github.com/flaqai/open-deepseek-harness-desktop) and
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
+> **To be clear: there is no DSH inside this app.**
+>
+> It does **not** bundle DeepSeek Harness into the APK, and it does **not** run a copy of DSH on
+> the phone. It is a **shell**: a WebView pointed at the DSH web page **already running on your
+> computer**, plus the few things a browser cannot do (keep the access PIN in the platform
+> keystore, manage several devices, turn page notifications into system notifications).
+>
+> Model calls, code execution, file access and session history all still happen **on your
+> computer**. The phone is a remote control, not a host — if DSH is not running there, the app is
+> a screen that cannot connect.
+>
+> In other words: DSH itself comes from the two upstream projects. This project only wraps it for
+> the phone, and makes that wrapper better than a browser tab.
+
 The desktop build already exposes DSH to a phone browser through its "Phone access" page.
 A browser still makes that awkward:
 
@@ -40,6 +54,9 @@ A browser still makes that awkward:
 - **Device list** — multiple DSH servers; tap to switch, rename, edit or delete.
 - **Nicknames** — each device has a name, shown in the middle of the bottom bar. Tap it to
   return to that device, long-press to edit it.
+- **No first-run wizard** — DSH's setup dialog means nothing on a server that is already
+  configured, so the app clicks through its own "skip all → start using" for you (can be turned
+  off in Settings).
 - **Two addresses per device** — store an alternate address (usually the Tailscale one)
   alongside the main one. Both are probed at connect time and the one that answers first is
   used: LAN at home, Tailscale elsewhere, with no manual switching.

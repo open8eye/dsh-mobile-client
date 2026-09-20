@@ -15,6 +15,7 @@ class AppSettings {
     this.notifyOnlyInBackground = true,
     this.keepScreenAwake = false,
     this.autoReconnect = true,
+    this.skipDshOnboarding = true,
     this.petEnabled = false,
     this.petScale = 1.0,
     this.petOpacity = 1.0,
@@ -41,6 +42,13 @@ class AppSettings {
 
   /// Re-apply the stored password when the session is rejected.
   final bool autoReconnect;
+
+  /// Click through DSH's first-run wizard instead of showing it.
+  ///
+  /// A phone can never persist the acknowledgement — DSH binds settings
+  /// persistence to loopback — so the wizard returns on every reload. Defaults
+  /// to on: anyone connecting from this app already has a configured DSH.
+  final bool skipDshOnboarding;
 
   /// Android-only floating companion over the launcher.
   final bool petEnabled;
@@ -69,6 +77,7 @@ class AppSettings {
     bool? notifyOnlyInBackground,
     bool? keepScreenAwake,
     bool? autoReconnect,
+    bool? skipDshOnboarding,
     bool? petEnabled,
     double? petScale,
     double? petOpacity,
@@ -86,6 +95,7 @@ class AppSettings {
       notifyOnlyInBackground: notifyOnlyInBackground ?? this.notifyOnlyInBackground,
       keepScreenAwake: keepScreenAwake ?? this.keepScreenAwake,
       autoReconnect: autoReconnect ?? this.autoReconnect,
+      skipDshOnboarding: skipDshOnboarding ?? this.skipDshOnboarding,
       petEnabled: petEnabled ?? this.petEnabled,
       petScale: petScale ?? this.petScale,
       petOpacity: petOpacity ?? this.petOpacity,
@@ -104,6 +114,7 @@ class AppSettings {
         'notifyOnlyInBackground': notifyOnlyInBackground,
         'keepScreenAwake': keepScreenAwake,
         'autoReconnect': autoReconnect,
+        'skipDshOnboarding': skipDshOnboarding,
         'petEnabled': petEnabled,
         'petScale': petScale,
         'petOpacity': petOpacity,
@@ -126,6 +137,7 @@ class AppSettings {
       notifyOnlyInBackground: _bool(json['notifyOnlyInBackground'], fallback.notifyOnlyInBackground),
       keepScreenAwake: _bool(json['keepScreenAwake'], fallback.keepScreenAwake),
       autoReconnect: _bool(json['autoReconnect'], fallback.autoReconnect),
+      skipDshOnboarding: _bool(json['skipDshOnboarding'], fallback.skipDshOnboarding),
       petEnabled: _bool(json['petEnabled'], fallback.petEnabled),
       petScale: _double(json['petScale'], fallback.petScale),
       petOpacity: _double(json['petOpacity'], fallback.petOpacity),

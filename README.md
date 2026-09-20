@@ -1,7 +1,7 @@
 <h1 align="center">DSH Mobile Client</h1>
 
 <p align="center">
-  <strong>把电脑上的 DeepSeek Harness 装进手机：一个 App、扫码即连、长期免密。</strong>
+  <strong>给电脑上跑着的 DeepSeek Harness 配一个手机 App：扫码即连、长期免密。</strong>
 </p>
 
 <p align="center">
@@ -21,6 +21,17 @@
 **DSH Mobile Client** 是 [Open DeepSeek Harness Desktop](https://github.com/flaqai/open-deepseek-harness-desktop)
 （社区桌面版）与 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的**移动端客户端**。
 
+> **先说清楚：这个 App 里没有 DSH。**
+>
+> 它**不是**把 DeepSeek Harness 打包塞进手机，也**不是**在手机上跑一份 DSH。它是一层**外壳**：
+> 用 WebView 打开**你电脑上已经跑着**的那个 DSH 网页，再补上浏览器做不到的几件事
+> （访问密码存进系统密钥库、多设备管理、网页通知转成系统通知）。
+>
+> 模型调用、代码执行、文件读写、会话记录**全部仍然发生在你的电脑上**——手机是遥控器，不是主机。
+> 电脑上的 DSH 没在跑，App 就是一块连不上的屏幕。
+>
+> 换句话说：DSH 本体来自上游两个项目，本项目只负责**把它套壳到手机里**，并让这层壳比浏览器好用。
+
 桌面版自带的「手机访问」已经能把 DSH 暴露给手机浏览器，但用浏览器访问始终有几处不顺手：
 
 | 浏览器访问的不便 | 本 App 的做法 |
@@ -38,6 +49,8 @@
 - **设备列表** — 支持多台 DSH；点击即切换，可重命名、改地址、删除。
 - **设备昵称** — 每台设备都能取名字，昵称直接显示在底部导航栏中间；点一下回到这台设备，
   长按进入配置页。
+- **不再被首次引导拦住** — DSH 的「初始化」弹窗对已经配置好的服务器没有意义，App 会替你
+  点掉它自己的「跳过全部 → 开始体验」（设置页可关）。
 - **一台设备两个地址** — 主地址之外再存一个「备用地址」（通常是 Tailscale 地址）。
   连接时两个地址同时探测、用先回应的那个：在家走局域网，出门走 Tailscale，不用手动切。
 - **多设备同时在线** — 连上的设备各自保活一个会话（最多 4 个），切换是秒切，不重新加载、不用重新登录。

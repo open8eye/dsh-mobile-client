@@ -8,6 +8,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/browser/compat_script.dart';
+import '../../core/browser/onboarding_script.dart';
 import '../../core/browser/overscroll_script.dart';
 import '../../core/dsh/dsh_endpoint.dart';
 import '../../core/diagnostics/diagnostics.dart';
@@ -188,6 +189,10 @@ class DshWebViewState extends State<DshWebView> {
       _retriedWithStoredPassword = false;
       _promptAppliedPassword = null;
       _failure = null;
+      _load(_entryUrl);
+    } else if (oldWidget.settings.skipDshOnboarding != widget.settings.skipDshOnboarding) {
+      // Injected user scripts are fixed at creation, so the only way to change
+      // which ones apply is a fresh page.
       _load(_entryUrl);
     } else if (oldWidget.password != widget.password) {
       if (widget.password != null && widget.password == _promptAppliedPassword) {
@@ -497,6 +502,13 @@ class DshWebViewState extends State<DshWebView> {
               source: OverscrollScript.source,
               injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             ),
+            // Only when asked for: it reaches into DSH's own onboarding
+            // surface, so it is the one script a user can turn off.
+            if (widget.settings.skipDshOnboarding)
+              UserScript(
+                source: OnboardingScript.source,
+                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              ),
           ]),
           onWebViewCreated: (controller) {
             _controller = controller;

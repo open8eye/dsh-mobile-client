@@ -118,6 +118,7 @@ PetOverlayService (前台服务, specialUse)
 | 加语言 | `core/i18n/l10n.dart` 的 `_table` |
 | 换存储后端（如 sqlite） | `core/storage/*`，控制器只依赖接口 |
 | 补一个浏览器 API 垫片 | `core/browser/compat_script.dart` 的 `source`，并在 `tools/compat_check.mjs` 里加对比 |
+| 改 DSH 页面的行为 | `core/browser/` 下一个 `*_script.dart`，在 `dsh_webview.dart` 的 `initialUserScripts` 里注入；DOM 相关的逻辑在 `tools/onboarding_check.mjs` 里对着桩页面验证 |
 | 换内置内核版本 | `tools/fetch_webview_kernel.sh` 的环境变量，或 `WebViewKernel.kt` 的候选表 |
 
 ## 七、WebView 兼容层
@@ -144,3 +145,29 @@ PetOverlayService (前台服务, specialUse)
 
 垫片**正确性**不能靠读代码确认。`tools/compat_check.mjs` 把原生实现删掉、换成垫片、逐项对比
 结果，覆盖到 `Object.hasOwn` 这类「写错就静默出错」的 API。它是差分测试，所以需要 Node 24+。
+
+## 八、注入脚本
+
+`dsh_webview.dart` 的 `initialUserScripts` 里有几个 `AT_DOCUMENT_START` 脚本，各管一件事：
+
+| 脚本 | 管什么 | 关掉会怎样 |
+|---|---|---|
+| `CompatScript` | 补浏览器缺的 API | 老内核上白屏（见上节） |
+| `DiagnosticsScript` | 转发垫片回报与页面错误 | 诊断报告里看不到 `compat:` 那几行 |
+| `WebNotificationScript` | 把网页通知冒泡成系统通知 | 收不到通知 |
+| `OverscrollScript` | `overscroll-behavior-x:none`，掐掉 WebView 自己的横向历史回退 | 页面中间横划仍可能返回 |
+| `OnboardingScript` | 替用户点掉 DSH 的首次引导 | 每次重载都弹一次引导 |
+
+后两个改的是 **DSH 自己的页面**，边界比前三个更需要说清楚：
+
+- **注入时机**：`initialUserScripts` 只在 WebView 创建时生效，改设置要重新加载页面
+  （`didUpdateWidget` 里为此加了一个分支）。
+- **只点它自己的出口**：`OnboardingScript` 不隐藏、不移除、不碰 `#root.inert`，只在
+  `#root` 处于 `inert`（DSH 引导步骤的契约信号，别处不设）时，点那个**有文字的**按钮——
+  也就是用户自己会点的「跳过全部」和「开始体验」。DSH 换了 DOM 就什么都点不到，
+  最坏结果只是弹窗照旧：失败模式是「没效果」，不是「点错东西」。
+- **为什么不能从服务端修**：DSH 把设置持久化绑在 loopback 上
+  （`remote.$host.isLoopback ? 'host' : 'memory'`），手机的确认只活在一个 JS 变量里，
+  刷新即失效。放开这条边界等于让手机能改电脑的设置文件，不值得。
+
+`tools/onboarding_check.mjs` 用一份手写的桩 DOM 跑**真脚本**，验证它只在该动手时动手。

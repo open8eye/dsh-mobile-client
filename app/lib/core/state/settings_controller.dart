@@ -55,6 +55,9 @@ class SettingsController extends ChangeNotifier {
 
   Future<void> setAutoReconnect(bool value) => update(_settings.copyWith(autoReconnect: value));
 
+  Future<void> setSkipDshOnboarding(bool value) =>
+      update(_settings.copyWith(skipDshOnboarding: value));
+
   Future<void> setAutoOpenLastDevice(bool value) =>
       update(_settings.copyWith(autoOpenLastDevice: value));
 
