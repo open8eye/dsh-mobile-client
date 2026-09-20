@@ -10,8 +10,17 @@ import 'release_channels.dart';
 
 /// Raised when an update step fails for a reason worth showing the user.
 class UpdateException implements Exception {
-  const UpdateException(this.message);
+  const UpdateException(this.message, {this.statusCode});
   final String message;
+
+  /// HTTP status, when the failure was an answer rather than the network.
+  final int? statusCode;
+
+  /// A release API answers 404 for "this repository has no release". That is
+  /// not a transient failure and not a network problem — it is what an app
+  /// that has never been published gets, so it earns its own message.
+  bool get isMissing => statusCode == 404;
+
   @override
   String toString() => message;
 }
@@ -108,6 +117,7 @@ class UpdateService {
 
     final errors = <String>[];
     final found = <ReleaseInfo>[];
+    var missing = 0;
 
     // Queried together: on a phone that can only reach one of the two hosts,
     // the other would otherwise add its timeout to every single check.
@@ -118,6 +128,7 @@ class UpdateService {
           if (release != null) found.add(release);
         } on UpdateException catch (error) {
           errors.add('${source.label}: ${error.message}');
+          if (error.isMissing) missing++;
         } on Exception catch (error) {
           errors.add('${source.label}: $error');
         }
@@ -127,7 +138,7 @@ class UpdateService {
     if (found.isEmpty) {
       return UpdateCheckResult(
         currentVersion: currentVersion,
-        error: errors.isEmpty ? 'no release found' : errors.join('\n'),
+        error: describeFailure(errors, missing: missing, sources: sources.length),
       );
     }
 
@@ -139,6 +150,23 @@ class UpdateService {
       release: best,
       updateAvailable: current == null || best.version > current,
     );
+  }
+
+  /// Turn the per-source failures into one message the UI can act on.
+  ///
+  /// Every channel answering 404 is a different situation from a host being
+  /// unreachable, and it is the one a freshly published app hits first:
+  /// nothing has been released yet. The UI owns that explanation, so the raw
+  /// statuses do not have to carry it.
+  @visibleForTesting
+  static String describeFailure(
+    List<String> errors, {
+    required int missing,
+    required int sources,
+  }) {
+    if (sources > 0 && missing == sources) return 'notPublished';
+    if (errors.isEmpty) return 'no release found';
+    return errors.join('\n');
   }
 
   Future<ReleaseInfo?> _fetchLatest(ReleaseSource source) async {
@@ -171,7 +199,10 @@ class UpdateService {
     final response = await request.close().timeout(const Duration(seconds: 20));
     final body = await response.transform(utf8.decoder).join();
     if (response.statusCode != 200) {
-      throw UpdateException('HTTP ${response.statusCode}');
+      throw UpdateException(
+        'HTTP ${response.statusCode}',
+        statusCode: response.statusCode,
+      );
     }
     final decoded = jsonDecode(body);
     if (decoded is! Map<String, Object?>) {

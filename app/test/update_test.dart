@@ -4,6 +4,57 @@ import 'package:dsh_mobile_client/core/update/update_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  group('UpdateException.isMissing', () {
+    test('only a 404 counts as "nothing published"', () {
+      // A 404 from a release API is an answer, not an outage: the repository
+      // is missing, private, or simply has no release. Everything else is a
+      // failure the user cannot fix by publishing.
+      expect(const UpdateException('HTTP 404', statusCode: 404).isMissing, isTrue);
+      expect(const UpdateException('HTTP 403', statusCode: 403).isMissing, isFalse);
+      expect(const UpdateException('HTTP 500', statusCode: 500).isMissing, isFalse);
+      expect(const UpdateException('timed out').isMissing, isFalse);
+    });
+  });
+
+  group('UpdateService.describeFailure', () {
+    test('every channel answering 404 becomes its own diagnosis', () {
+      // This is the state a freshly published app is in, and the one the
+      // user hit: both hosts answer 404 until a release exists. Showing
+      // "GitHub: HTTP 404 / Gitee: HTTP 404" would not say that.
+      expect(
+        UpdateService.describeFailure(
+          <String>['GitHub: HTTP 404', 'Gitee: HTTP 404'],
+          missing: 2,
+          sources: 2,
+        ),
+        'notPublished',
+      );
+    });
+
+    test('one 404 among real failures keeps the detail', () {
+      // A host that answered is not the whole story when the other timed out.
+      expect(
+        UpdateService.describeFailure(
+          <String>['GitHub: HTTP 404', 'Gitee: SocketException'],
+          missing: 1,
+          sources: 2,
+        ),
+        'GitHub: HTTP 404\nGitee: SocketException',
+      );
+    });
+
+    test('nothing found and nothing wrong is not a 404', () {
+      expect(
+        UpdateService.describeFailure(
+          const <String>[],
+          missing: 0,
+          sources: 2,
+        ),
+        'no release found',
+      );
+    });
+  });
+
   group('AppVersion', () {
     test('accepts the shapes that appear in tags and pubspec', () {
       expect(AppVersion.tryParse('1.2.3')?.core, '1.2.3');

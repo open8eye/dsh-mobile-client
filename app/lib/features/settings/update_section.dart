@@ -79,9 +79,11 @@ class UpdateSection extends StatelessWidget {
       UpdatePhase.downloading => context.tr('settingsUpdateDownloading'),
       UpdatePhase.needsPermission => context.tr('settingsUpdateNeedsPermission'),
       UpdatePhase.ready => context.tr('settingsUpdateReady'),
-      UpdatePhase.error => update.error == null || update.error == 'noApk'
-          ? context.tr('settingsUpdateUnreachable')
-          : context.tr('settingsUpdateFailed'),
+      UpdatePhase.error => switch (update.error) {
+          null || 'noApk' => context.tr('settingsUpdateUnreachable'),
+          'notPublished' => context.tr('settingsUpdateNotPublished'),
+          _ => context.tr('settingsUpdateFailed'),
+        },
     };
   }
 
@@ -172,15 +174,27 @@ class UpdateSection extends StatelessWidget {
         ];
 
       case UpdatePhase.error:
+        // 'notPublished' is a diagnosis, not a failure detail: the hosts
+        // answered, they simply have nothing to offer yet. Showing the raw
+        // "GitHub: HTTP 404 / Gitee: HTTP 404" would leave the user to
+        // decode that themselves.
+        final notPublished = update.error == 'notPublished';
         return <Widget>[
           ListTile(
             leading: Icon(Icons.error_outline, color: theme.colorScheme.error),
             title: Text(update.error == 'noApk'
                 ? context.tr('settingsUpdateNoApk')
-                : context.tr('settingsUpdateFailed')),
+                : notPublished
+                    ? context.tr('settingsUpdateNotPublished')
+                    : context.tr('settingsUpdateFailed')),
             subtitle: update.error == null || update.error == 'noApk'
                 ? null
-                : Text(update.error!, style: theme.textTheme.bodySmall),
+                : Text(
+                    notPublished
+                        ? context.tr('settingsUpdateNotPublishedHint')
+                        : update.error!,
+                    style: theme.textTheme.bodySmall,
+                  ),
             trailing: TextButton(
               onPressed: () => update.check(
                 prefer: context.read<SettingsController>().settings.updateSource,
