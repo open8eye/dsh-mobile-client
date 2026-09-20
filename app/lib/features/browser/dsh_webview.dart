@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/browser/compat_script.dart';
 import '../../core/dsh/dsh_endpoint.dart';
 import '../../core/diagnostics/diagnostics.dart';
 import '../../core/diagnostics/diagnostics_report.dart';
@@ -111,6 +112,23 @@ class DshWebViewState extends State<DshWebView> {
     // From here on the PIN cannot appear in a log line, a probe result or a
     // report, no matter what the page echoes back at us.
     Diagnostics.instance.registerSecret(widget.password);
+    unawaited(_logEnvironment());
+  }
+
+  /// Put the host facts at the top of the log.
+  ///
+  /// The WebView version is the single most useful line in a white-screen
+  /// report: it decides whether the engine can run the bundle at all.
+  Future<void> _logEnvironment() async {
+    final info = await DiagnosticsReport.deviceInfo();
+    if (info.isEmpty) return;
+    Diagnostics.instance.info(
+      'Device',
+      '${info['manufacturer'] ?? ''} ${info['model'] ?? ''}'
+      ' · Android ${info['androidRelease'] ?? '?'}'
+      ' · MIUI ${info['miui'] ?? '-'}'
+      ' · WebView ${info['webViewPackage'] ?? '?'} ${info['webViewVersion'] ?? '?'}',
+    );
   }
 
   @override
@@ -354,8 +372,14 @@ class DshWebViewState extends State<DshWebView> {
             userAgent: '',
           ),
           initialUserScripts: UnmodifiableListView<UserScript>(<UserScript>[
-            // First, so it is installed before the page's own bundles run and
-            // can catch their bootstrap failures.
+            // Order matters. The shims go first: the DSH bundle needs them the
+            // moment it starts evaluating, and a shim installed afterwards is
+            // a shim installed too late.
+            UserScript(
+              source: CompatScript.source,
+              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            ),
+            // Then the error hooks, so they catch the page's own bootstrap.
             UserScript(
               source: DiagnosticsScript.source,
               injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,

@@ -84,6 +84,15 @@ abstract final class DiagnosticsScript {
   send('info', 'diagnostics hook installed');
   send('info', 'origin=' + location.origin + ' secureContext=' + window.isSecureContext);
   send('info', 'userAgent=' + navigator.userAgent);
+
+  // The compatibility shims run first and park their findings here, because
+  // this hook is what owns the retry queue that can actually deliver them.
+  try {
+    var compat = window.__dshCompatReport;
+    if (compat && compat.length) {
+      for (var i = 0; i < compat.length; i++) { send('info', 'compat: ' + compat[i]); }
+    }
+  } catch (e) { /* not fatal */ }
 })();
 ''';
 

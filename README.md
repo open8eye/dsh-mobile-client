@@ -208,6 +208,18 @@ CI 会校验 tag 与 `pubspec.yaml` 是否一致、跑分析和测试、构建 A
 >
 > 这也是为什么白屏值得单独处理：它是唯一一种「页面加载成功了、但什么都没显示」的故障，没有错误码、没有异常，用户手上没有任何可反馈的东西。
 
+### 白屏的根因与兼容层
+
+DSH 的前端由 Vite 构建。Vite 会把**语法**降级到目标浏览器，但**不会 polyfill 运行时 API**——而它的包里用了 `Object.hasOwn`（需要 Chromium 93）和 `Array.prototype.at`（需要 Chromium 92）。
+
+关键在于 `Object.hasOwn` 的每一处调用都在**引导整个应用的依赖注入容器**里。在 Chromium < 93 的 WebView 上它是 `undefined`，容器在装配自己时就抛 `TypeError`，React 永远挂不上，页面一片白——**没有错误码，没有异常，什么都没有**。这类 WebView 在旧机型上很常见（Android 10 / MIUI 12 等）。
+
+App 因此在页面脚本之前注入一层兼容 shim，补齐这几个 API，并记录**哪些是被补上的**。报告里出现 `compat: SHIMMED Object.hasOwn, ...`，就说明该升级系统 WebView 了。
+
+还有一个方向相反的坑：`crypto.randomUUID` 要求**安全上下文**，而本 App 是刻意用明文 HTTP 连局域网地址的——所以它在**最新**的 WebView 上同样不存在。`crypto.getRandomValues` 没有这个限制，于是也被一并补上。
+
+每个 shim 都先检测原生实现，新设备上完全不生效；并且与原生实现做过逐项差分对比。
+
 ## 构建
 
 ### 本地构建
@@ -262,6 +274,8 @@ app/lib/
 │   ├── models/                    # 设备与设置的数据模型
 │   ├── storage/                   # JSON 文档 + 系统密钥库
 │   ├── notifications/             # 通知服务 + 注入网页的 JS 桥
+│   ├── browser/compat_script.dart # 注入页面的兼容 shim（旧 WebView 白屏的根因）
+│   ├── diagnostics/               # 日志、脱敏、页面探测、反馈报告
 │   ├── update/                    # 版本比较、GitHub/Gitee 查询、APK 下载
 │   ├── platform/app_platform.dart # 系统设置页 / 安装 APK 的 MethodChannel
 │   ├── pet/pet_platform.dart      # 悬浮窗 MethodChannel

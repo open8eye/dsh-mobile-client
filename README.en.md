@@ -222,6 +222,29 @@ run's logs, and any JavaScript exception or `console.error` captured from the pa
 > loads successfully and paints nothing, with no error code and no exception, leaving the user
 > nothing at all to report.
 
+### Why the page goes blank, and the compatibility layer
+
+The DSH frontend is built by Vite. Vite transpiles **syntax** down to its target, but it does not
+polyfill **runtime APIs** — and the bundle uses `Object.hasOwn` (needs Chromium 93) and
+`Array.prototype.at` (needs Chromium 92).
+
+The decisive part is that every `Object.hasOwn` call site sits inside the **dependency-injection
+container that bootstraps the whole app**. On a WebView older than Chromium 93 it is `undefined`,
+the container throws while wiring itself up, React never mounts, and the page stays white — **no
+error code, no exception, nothing**. Such WebViews are common on older devices (Android 10 /
+MIUI 12 and similar).
+
+The app therefore injects a compatibility layer ahead of the page's own scripts, filling those
+APIs in and reporting **which ones it had to fill**. A `compat: SHIMMED Object.hasOwn, ...` line in
+the report means the system WebView should be updated.
+
+There is a trap pointing the other way too: `crypto.randomUUID` requires a **secure context**, and
+this app deliberately talks to a LAN address over plain HTTP — so it is missing even on the
+**newest** WebView. `crypto.getRandomValues` carries no such restriction, so it is shimmed as well.
+
+Every shim checks for the native implementation first, so a current device is untouched, and each
+was differentially tested against the native behaviour.
+
 ## Building
 
 Requires Flutter 3.35+, the Android SDK (compileSdk 36) and JDK 17–23
