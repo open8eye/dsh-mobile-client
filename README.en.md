@@ -47,6 +47,21 @@ A browser still makes that awkward:
 | Open browser, find address, type password, every time | Open the app; it goes straight to the last device |
 | Want some personality | A **desktop companion** that floats over the launcher (Android) — **on hold, see below** |
 
+## Screenshots
+
+Taken on a real Android device:
+
+<p align="center">
+  <img src="docs/images/screenshot-scan.jpg" width="200" alt="Scan to connect">
+  <img src="docs/images/screenshot-devices.jpg" width="200" alt="Device list">
+  <img src="docs/images/screenshot-home.jpg" width="200" alt="The DSH page once connected">
+  <img src="docs/images/screenshot-settings.jpg" width="200" alt="Settings">
+</p>
+
+Left to right: scan to add a device → the device list (a device's LAN and Tailscale addresses) →
+the DSH page on the computer, straight after connecting → Settings (theme, notification
+forwarding, automatic re-login).
+
 ## Features
 
 - **Scan to connect** — scan the QR code on the computer's Settings → Phone access page.

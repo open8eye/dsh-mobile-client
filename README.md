@@ -42,6 +42,20 @@
 | 每次都要打开浏览器、找地址、输密码 | 打开 App 直接进入上次的设备 |
 | 想有点个性 | **桌面伙伴**：动漫角色悬浮在手机桌面上（Android）——**暂缓，见下** |
 
+## 界面
+
+真机截图（Android）：
+
+<p align="center">
+  <img src="docs/images/screenshot-scan.jpg" width="200" alt="扫一扫连接">
+  <img src="docs/images/screenshot-devices.jpg" width="200" alt="设备列表">
+  <img src="docs/images/screenshot-home.jpg" width="200" alt="连接后的 DSH 页面">
+  <img src="docs/images/screenshot-settings.jpg" width="200" alt="设置">
+</p>
+
+从左到右：扫一扫添加设备 → 设备列表（同一台设备的局域网与 Tailscale 两个地址）→
+连接后直接进入电脑上的 DSH 页面 → 设置（主题、通知转发、自动重新登录）。
+
 ## 功能
 
 - **扫一扫连接** — 扫描电脑上「设置 → 手机访问」页面的二维码即可添加设备。
