@@ -1,18 +1,14 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/i18n/l10n.dart';
 import '../../core/notifications/notification_service.dart';
-import '../../core/pet/pet_platform.dart';
+import '../../core/pet/pet_feature.dart';
 import '../../core/state/device_controller.dart';
 import '../../core/state/settings_controller.dart';
 import '../about/about_screen.dart';
 import '../diagnostics/diagnostics_screen.dart';
-import '../pet/companion_preview.dart';
+import '../pet/companion_settings.dart';
 import 'settings_widgets.dart';
 import 'update_section.dart';
 
@@ -26,11 +22,6 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObserver {
   bool? _notificationPermission;
-
-  /// Set when the user asked for the companion but still has to grant the
-  /// overlay permission on the system screen. Android gives us no callback for
-  /// that screen, so the request is completed when the app comes back.
-  bool _pendingPetEnable = false;
 
   @override
   void initState() {
@@ -47,9 +38,9 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed || !_pendingPetEnable) return;
-    _pendingPetEnable = false;
-    _enablePet(context.read<SettingsController>());
+    // The notification permission can be granted from the system screen while
+    // the app is in the background, so re-read it on the way back.
+    if (state == AppLifecycleState.resumed) _refreshPermission();
   }
 
   Future<void> _refreshPermission() async {
@@ -63,85 +54,6 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  Future<void> _togglePet(bool value, SettingsController settings) async {
-    if (!value) {
-      await context.read<PetPlatform>().hide();
-      await settings.setPetEnabled(false);
-      if (!mounted) return;
-      _snack(context.tr('petDisabled'));
-      return;
-    }
-    await _enablePet(settings);
-  }
-
-  /// Turn the companion on, granting the overlay permission first if needed.
-  Future<void> _enablePet(SettingsController settings) async {
-    final pet = context.read<PetPlatform>();
-    final supported = await pet.isSupported();
-    if (!mounted) return;
-    if (!supported) {
-      _snack(context.tr('petUnsupported'));
-      return;
-    }
-
-    var granted = await pet.hasOverlayPermission();
-    if (!granted) {
-      await pet.requestOverlayPermission();
-      // The system screen has no result; finish the job on resume instead of
-      // telling the user to flip the switch a second time.
-      _pendingPetEnable = true;
-      if (!mounted) return;
-      _snack(context.tr('petPermissionDenied'));
-      return;
-    }
-
-    final current = settings.settings;
-    final shown = await pet.show(
-      scale: current.petScale,
-      opacity: current.petOpacity,
-      imagePath: current.petImagePath,
-    );
-    if (!mounted) return;
-    if (!shown) {
-      _snack(context.tr('petPermissionDenied'));
-      return;
-    }
-    await settings.setPetEnabled(true);
-    if (!mounted) return;
-    _snack(context.tr('petEnabled'));
-  }
-
-  /// Copy the picked image into the app data directory.
-  ///
-  /// image_picker returns a path inside the system cache, which Android is free
-  /// to delete; a companion that disappears after a reboot would look like a bug.
-  Future<String?> _persistCompanionImage(String sourcePath) async {
-    try {
-      final dir = await getApplicationSupportDirectory();
-      final target = File('${dir.path}/companion${sourcePath.contains('.') ? sourcePath.substring(sourcePath.lastIndexOf('.')) : '.png'}');
-      await File(sourcePath).copy(target.path);
-      return target.path;
-    } on Exception {
-      return sourcePath;
-    }
-  }
-
-  Future<void> _pickCompanionImage(SettingsController settings) async {
-    final pet = context.read<PetPlatform>();
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-    if (picked == null) return;
-    final stored = await _persistCompanionImage(picked.path);
-    await settings.setPetImagePath(stored);
-    final current = settings.settings;
-    if (current.petEnabled) {
-      await pet.show(
-        scale: current.petScale,
-        opacity: current.petOpacity,
-        imagePath: stored,
-      );
-    }
   }
 
   Future<void> _clearPasswords(DeviceController devices) async {
@@ -281,73 +193,9 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
             onChanged: settings.setAutoOpenLastDevice,
           ),
 
-          SettingsSectionHeader(title: context.tr('settingsCompanion')),
-          ListTile(
-            leading: SizedBox(
-              width: 56,
-              height: 56,
-              child: current.petImagePath == null
-                  ? const CompanionPreview(size: 56)
-                  : Image.file(File(current.petImagePath!), fit: BoxFit.contain),
-            ),
-            title: Text(context.tr('settingsPetEnabled')),
-            subtitle: Text(context.tr('settingsPetEnabledHint')),
-            trailing: Switch(
-              value: current.petEnabled,
-              onChanged: (value) => _togglePet(value, settings),
-            ),
-          ),
-          ListTile(
-            title: Text(context.tr('settingsPetPickImage')),
-            trailing: const Icon(Icons.image_outlined),
-            onTap: () => _pickCompanionImage(settings),
-          ),
-          if (current.petImagePath != null)
-            ListTile(
-              title: Text(context.tr('settingsPetResetImage')),
-              trailing: const Icon(Icons.restart_alt),
-              onTap: () => settings.setPetImagePath(null),
-            ),
-          ListTile(
-            title: Text(context.tr('settingsPetScale')),
-            subtitle: Slider(
-              value: current.petScale,
-              min: 0.5,
-              max: 2.0,
-              divisions: 6,
-              label: current.petScale.toStringAsFixed(1),
-              onChanged: settings.setPetScale,
-              onChangeEnd: (value) async {
-                if (settings.settings.petEnabled) {
-                  await context.read<PetPlatform>().show(
-                        scale: value,
-                        opacity: settings.settings.petOpacity,
-                        imagePath: settings.settings.petImagePath,
-                      );
-                }
-              },
-            ),
-          ),
-          ListTile(
-            title: Text(context.tr('settingsPetOpacity')),
-            subtitle: Slider(
-              value: current.petOpacity,
-              min: 0.3,
-              max: 1.0,
-              divisions: 7,
-              label: current.petOpacity.toStringAsFixed(1),
-              onChanged: settings.setPetOpacity,
-              onChangeEnd: (value) async {
-                if (settings.settings.petEnabled) {
-                  await context.read<PetPlatform>().show(
-                        scale: settings.settings.petScale,
-                        opacity: value,
-                        imagePath: settings.settings.petImagePath,
-                      );
-                }
-              },
-            ),
-          ),
+          // The companion is on hold for now. The section still compiles and
+          // is still analysed, it just is not offered; see PetFeature.available.
+          if (PetFeature.available) const CompanionSettingsSection(),
 
           SettingsSectionHeader(title: context.tr('settingsData')),
           ListTile(

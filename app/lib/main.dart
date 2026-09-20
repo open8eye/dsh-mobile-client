@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'app.dart';
 import 'core/diagnostics/diagnostics.dart';
 import 'core/notifications/notification_service.dart';
+import 'core/pet/pet_feature.dart';
 import 'core/pet/pet_platform.dart';
 import 'core/state/app_lifecycle.dart';
 import 'core/state/device_controller.dart';
@@ -23,6 +24,17 @@ Future<void> main() async {
 
   final settings = SettingsController(repository: SettingsRepository());
   await settings.load();
+
+  // The companion is on hold, but an install that had it switched on would
+  // otherwise keep an overlay running with no switch left to turn it off.
+  if (!PetFeature.available && settings.settings.petEnabled) {
+    try {
+      await PetPlatform().hide();
+    } on Exception {
+      // Nothing was showing, or this platform has no overlay at all.
+    }
+    await settings.setPetEnabled(false);
+  }
 
   final devices = DeviceController(
     repository: DeviceRepository(),

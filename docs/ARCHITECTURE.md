@@ -11,7 +11,7 @@ App (Flutter)
  │   ├─ features/scanner               相机 → DshEndpoint
  │   ├─ features/browser/dsh_webview   WebView + JS 桥 + 自动重新登录
  │   ├─ features/devices               设备列表 / 增删改
- │   └─ features/settings              设置 / 桌宠 / 关于
+ │   └─ features/settings              设置 / 关于（桌宠暂缓，见 pet_feature.dart）
  │
  ├─ core/state/*Controller             ChangeNotifier：设备、设置
  ├─ core/storage/*                      devices.json / settings.json / Keystore

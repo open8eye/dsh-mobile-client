@@ -31,7 +31,7 @@ A browser still makes that awkward:
 | Several computers, plus LAN / Tailscale / public entries, distinguishable only by bookmarks | A **device list**: scan to add, nickname, switch in one tap |
 | Web notifications never reach the phone | Page notifications are **forwarded to real system notifications** |
 | Open browser, find address, type password, every time | Open the app; it goes straight to the last device |
-| Want some personality | A **desktop companion** that floats over the launcher (Android) |
+| Want some personality | A **desktop companion** that floats over the launcher (Android) — **on hold, see below** |
 
 ## Features
 
@@ -48,8 +48,10 @@ A browser still makes that awkward:
 - **Automatic re-login** — the stored PIN is replayed whenever the session is rejected.
   This is the single biggest difference from using a browser.
 - **Tailscale remote access** — reach the computer from anywhere (see below).
-- **Desktop companion** — on Android the character floats over the launcher
-  (needs the overlay permission). iOS forbids third-party overlays, so there it is in-app only.
+- ~~**Desktop companion**~~ — **on hold, not offered in the UI.** The code, the Android
+  overlay service and the settings fields are all still here; only the entry point is
+  hidden. Flip `PetFeature.available` in `app/lib/core/pet/pet_feature.dart` to bring it
+  back. See [docs/DESKTOP-PET.md](docs/DESKTOP-PET.md).
 - **In-app updates** — checks GitHub and Gitee for a newer release, downloads it and hands
   it to the system installer (see [docs/RELEASING.md](docs/RELEASING.md)).
 
@@ -120,7 +122,7 @@ Download the APK from [Releases](../../releases), or build it yourself (see belo
 ### 4. Notifications and the companion
 
 - **Notifications** are on by default; the app asks for the system permission on first use.
-- **Companion**: Settings → Companion → enable, then grant "display over other apps".
+- **Companion**: on hold for now — the settings entry is hidden. See below.
 
 ## Tailscale remote access
 
@@ -135,6 +137,9 @@ To reach the computer over 4G without exposing DSH to the internet, Tailscale is
 Traffic stays inside your tailnet and never touches a third-party public entry point.
 
 ## Desktop companion
+
+> **On hold.** Nothing was removed, but the settings entry is hidden while the feature is
+> finished off. See `PetFeature.available`.
 
 | Platform | Capability |
 |---|---|
