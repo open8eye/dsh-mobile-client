@@ -52,8 +52,31 @@ git tag -a v1.1.0 -m "免密登录更稳
 - 设备列表支持拖动排序"
 
 # 4. 推上去，剩下的交给 CI
-git push origin master --tags
+./tools/push.sh
 ```
+
+`tools/push.sh` 把当前分支和所有 tag 推到两个远端（Gitee 的 `origin` 和 GitHub 的
+`github`），并在推之前**先比对最新 tag 与 `pubspec.yaml` 的版本号**——CI 的第一步就是
+查这个，对不上会直接失败，所以在这里挡住能省一次来回。
+
+```bash
+./tools/push.sh --tags-only    # 只推 tag
+./tools/push.sh --dry-run      # 只打印要执行的命令，不真的推
+```
+
+### 别再每次输密码
+
+两个平台都不接受账号密码（GitHub 从 2021 年起就不支持了），要的是令牌。让 git 记住它：
+
+```bash
+git config --global credential.helper store
+```
+
+之后第一次输入会被记下来，以后不用再输。`store` 是**明文**存在 `~/.git-credentials`；
+想更保守可以用 `cache`（只留在内存里，过一阵子忘掉），或者 `libsecret`（用桌面钥匙串）。
+
+GitHub 的令牌需要 `repo` 和 **`workflow`** 两个 scope——只要推送里改了
+`.github/workflows/` 下的文件，缺 `workflow` 就会被拒。
 
 推送 tag 之后，`.github/workflows/release.yml` 会自动：
 
