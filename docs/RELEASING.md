@@ -61,7 +61,16 @@ git push origin master --tags
 2. `flutter analyze` + `flutter test`；
 3. 构建 release APK（并用 `--dart-define` 把仓库地址编进包里）；
 4. 在 GitHub 建 Release 并附上 APK 与更新说明；
-5. 把 tag 推到 Gitee、建 Gitee Release、上传同一个 APK。
+5. 把 tag 推到 Gitee、建 Gitee Release、上传同一批 APK。
+
+**每次发布出两个包**，名字里带不带 `legacy` 就是它们的区别：
+
+| 附件名 | 内容 | 谁该装 |
+|---|---|---|
+| `dsh-mobile-client-<版本>.apk` | 普通版，复用手机上已装的更新内核 | 绝大多数人 |
+| `dsh-mobile-client-<版本>-legacy.apk` | 内置 arm32 Chromium 113，32 位进程 | 系统 WebView 太旧、又装不了新内核的老机器 |
+
+两个包都要传。App 内更新器**按文件名区分**二者并各取所需，不会把老设备更新到普通版，也不会让普通用户白下 120 MB。漏传某一个，那一半用户就收不到更新。
 
 ## 四、CI 需要的配置
 
@@ -81,16 +90,25 @@ CI 不可用时，本地构建后到两个平台手动建 Release：
 
 ```bash
 cd app
-flutter build apk --release \
+
+# 普通版
+flutter build apk --release --flavor standard \
   --dart-define=DSH_GITHUB_REPO=你的用户名/dsh-mobile-client \
   --dart-define=DSH_GITEE_REPO=你的用户名/dsh-mobile-client
-# 产物：build/app/outputs/flutter-apk/app-release.apk
+# 产物：build/app/outputs/flutter-apk/app-standard-release.apk
+
+# 内置内核版（先下载内核，约 85 MB）
+../tools/fetch_webview_kernel.sh
+flutter build apk --release --flavor legacy --target-platform android-arm \
+  --dart-define=DSH_GITHUB_REPO=你的用户名/dsh-mobile-client \
+  --dart-define=DSH_GITEE_REPO=你的用户名/dsh-mobile-client
+# 产物：build/app/outputs/flutter-apk/app-legacy-release.apk
 ```
 
 手动发布时的硬性要求：
 
 - tag 用 `v1.1.0` 形式，**和 `pubspec.yaml` 的版本号一致**；
-- 附件名以 `.apk` 结尾（建议 `dsh-mobile-client-1.1.0.apk`）；
+- 附件名以 `.apk` 结尾，两个包分别是 `dsh-mobile-client-1.1.0.apk` 和 `dsh-mobile-client-1.1.0-legacy.apk`；
 - Gitee 的 Release 需要仓库在「设置 → 仓库信息」里允许发布 Release。
 
 ## 六、签名（重要，别跳过）

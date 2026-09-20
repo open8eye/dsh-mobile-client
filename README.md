@@ -101,6 +101,15 @@ App 的做法是**把密码留在手机的系统密钥库里**，并且每次连
 
 从 [Releases](../../releases) 下载 APK 安装，或者按下面的「构建」自行编译。
 
+发布页有**两个包**，按手机情况选：
+
+| 包 | 体积 | 适合 |
+| :-- | :-- | :-- |
+| `dsh-mobile-client-<版本>.apk` | ~70 MB | 一般手机。系统 WebView 较新，或者手机上已经装了更新的内核 |
+| `dsh-mobile-client-<版本>-legacy.apk` | ~110 MB | **老手机**。内置了一份 Chromium，不依赖系统 WebView，也不要求用户装任何东西 |
+
+拿不准就先装普通版；如果连上去是白屏，说明系统 WebView 太旧，换 legacy 版。
+
 ### 3. 扫码连接
 
 1. 打开 App → 底部导航栏点 **扫一扫**；
@@ -254,18 +263,65 @@ App 会尝试**复用手机上已经安装的更新内核**，而不是要求用
 
 每个 shim 都先检测原生实现，新设备上完全不生效；并且与原生实现做过逐项差分对比。
 
+### 内置内核的版本（legacy）
+
+复用已装内核有个前提：**手机上得有一个够新的完整内核**。一台干净的老机器可能一个都没有。于是有一个把内核**直接打包进 App** 的版本。
+
+它内置的是 **AOSP `com.android.webview` arm32**（Chromium 113，minSdk 24），启动时解出来当内核用——**不安装任何东西、不碰系统、用户无感**。
+
+解包**由 App 自己做**，而不是用 WebViewUpgrade 的 `UpgradeAssetSource`：后者每次启动都会重新拷一遍，而且在后台线程上做，于是存在一个窗口——这次会话的第一个 WebView 可能仍按旧系统内核创建，而那个绑定一旦发生就收不回去。自己拷贝发生在 `ContentProvider.onCreate` 里，早于进程内任何可能创建 WebView 的代码。
+
+同理，**内置内核这条路在换内核之前不向 WebView 问任何问题**（连「系统当前用的是哪个内核」都不问）。库的 `checkPreconditions` 明确要求 `WebViewFactory.sProviderInstance == null`，早一点是确定安全的，早问一句则要靠推理——不如不推理。
+
+代价是磁盘：解出来的内核（~85 MB）加上它里面的 native 库（~64 MB），App 数据大约 **150 MB**。只在首次启动解一次，之后走缓存。
+
+两个设计选择：
+
+- **为什么是 arm32**：arm64 的单体内核接近 200 MB，arm32 只有 85 MB。所以 legacy 版本**自己也是 32 位构建**（`--target-platform android-arm`），让进程 ABI 和内核匹配。32 位 App 在 arm64 手机上照常运行，覆盖面反而更广。
+- **为什么是 AOSP 而不是 Google 版**：再分发许可上最干净，而且这个版本本来就是给老机器兜底的，差别不重要。
+- **为什么按进程 ABI 找内核**：`Build.SUPPORTED_ABIS` 描述的是设备而不是进程——64 位手机上的 32 位进程会先把 `arm64-v8a` 报在前面，而 arm64 内核装不进 32 位进程。所以先按 `Process.is64Bit()` 把列表切成匹配的那一半。
+- **为什么 legacy 包只打 armeabi-v7a**：Android 是按 APK 里的 native 库来定进程 ABI 的。某个插件的 AAR 只要带了 arm64 库，进程就会按 64 位起来，然后找不到 64 位的 Flutter 引擎。所以 legacy 变体用 `androidComponents.onVariants` 把 `arm64-v8a` / `x86_64` 排除掉，让这个选择没有歧义，顺带也小了一点。
+
+内核有 85 MB，不适合进仓库，所以单独下载：
+
+```bash
+./tools/fetch_webview_kernel.sh    # 下载到 app/android/app/src/legacy/assets/webview/
+```
+
+默认从 [WebViewPackage](https://github.com/JonaNorman/WebViewPackage) 取，直连失败会自动走 ghproxy 镜像。可以用环境变量换厂商 / ABI / 版本：
+
+```bash
+DSH_WEBVIEW_KERNEL_VENDOR=google DSH_WEBVIEW_KERNEL_VERSION=119.0.6045.53_min24_arm32 \
+  ./tools/fetch_webview_kernel.sh
+```
+
+> 内置的是第三方编译的 Chromium 二进制，再分发前请自行确认许可。仓库里只放机制和下载脚本，不放二进制。
+
+**两个版本的更新是分开的。** 更新器会先按文件名把两个包分开，再挑 ABI，绝不交叉——给老设备推普通包会白屏，给普通用户推 legacy 包则白白多下 110 MB。这一点有测试守着。
+
 ## 构建
 
 ### 本地构建
 
 需要：Flutter 3.35+、Android SDK（compileSdk 36）、JDK 17–23（Gradle 8.12 不支持 JDK 24+）。
 
+项目有两个 flavor，所以 **`--flavor` 是必填的**：
+
 ```bash
 cd app
 flutter pub get
 flutter analyze
-flutter build apk --release     # 产物：app/build/app/outputs/flutter-apk/app-release.apk
+
+# 普通版
+flutter build apk --release --flavor standard
+# 产物：app/build/app/outputs/flutter-apk/app-standard-release.apk
+
+# 内置内核版（先跑一次 tools/fetch_webview_kernel.sh）
+flutter build apk --release --flavor legacy --target-platform android-arm
+# 产物：app/build/app/outputs/flutter-apk/app-legacy-release.apk
 ```
+
+`flutter run` 同样需要 `--flavor standard`。
 
 iOS 需要 macOS + Xcode：
 
@@ -296,6 +352,13 @@ python3 tools/generate_icons.py   # 需要 Pillow
   `app/android/build.gradle.kts` 已把所有子项目统一抬到 36，无需手动装旧 SDK。
 - Gradle 8.12 不支持 JDK 24 及以上，请用 JDK 17–23。
 - 首次构建需要下载 Gradle 与依赖，耗时较长；之后是增量构建。
+- **R8 会吃掉 WebViewUpgrade**。Flutter 默认给 release 打开 R8，而这个库的 AAR 里
+  `proguard.txt` 是空的、不带 consumer rules，于是它会被混淆甚至删类——**构建照样成功、
+  APK 照样能装，只是这个功能在它本该帮助的旧设备上静默失效**。
+  `app/android/app/proguard-rules.pro` 里的 keep 规则就是为它准备的（Flutter 的 Gradle
+  插件本来就引用这个文件，只是默认不存在）。改动依赖后如果怀疑这个功能没生效，
+  可以在 `app/build/app/outputs/mapping/release/mapping.txt` 里搜 `com.norman.webviewup`：
+  映射应该是恒等的，出现 `R8$$REMOVED$$CLASS$$` 就说明规则没生效。
 
 ## 项目结构
 

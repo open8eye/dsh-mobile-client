@@ -24,6 +24,22 @@ class AppPlatform {
     }
   }
 
+  /// Which build of the app this is: `legacy` carries its own WebView kernel,
+  /// `standard` does not.
+  ///
+  /// The two ship as separate APKs and must never update into each other — a
+  /// standard APK on an old device white-screens, and a legacy APK is a
+  /// needless ~120 MB for everyone else.
+  static Future<String?> buildVariant() async {
+    try {
+      return await _channel.invokeMethod<String>('buildVariant');
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
   /// What the Android startup hook did about the WebView kernel.
   ///
   /// Returns a human-readable sentence, or null on a platform that has no such

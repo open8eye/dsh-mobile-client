@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../platform/app_platform.dart';
 import 'app_version.dart';
 import 'release_channels.dart';
 
@@ -58,18 +59,37 @@ class UpdateCheckResult {
   final String? error;
 }
 
+/// Which artefact this installation is.
+///
+/// The two builds are published side by side and must never update into each
+/// other — see [UpdateService.pickApk].
+enum BuildVariant {
+  /// The normal app: the system WebView, upgraded in-process to a newer kernel
+  /// that happens to be installed.
+  standard,
+
+  /// Carries its own WebView kernel, so it works on a device with nothing
+  /// newer installed.
+  legacy,
+}
+
 /// Checks GitHub and Gitee for a newer release and downloads its APK.
 ///
 /// Both hosts expose the same shape (`tag_name`, `body`, `assets[]`), so one
 /// parser covers them. The public APIs need no authentication, which is why
 /// this app can ship an updater at all.
 class UpdateService {
-  UpdateService({HttpClient? client}) : _client = client ?? HttpClient() {
+  UpdateService({HttpClient? client, BuildVariant? variant})
+      : _variant = variant,
+        _client = client ?? HttpClient() {
     _client.connectionTimeout = const Duration(seconds: 12);
     _client.userAgent = 'DSH-Mobile-Client';
   }
 
   final HttpClient _client;
+
+  /// Null until [_buildVariant] has asked the platform.
+  BuildVariant? _variant;
 
   void dispose() => _client.close(force: true);
 
@@ -127,7 +147,22 @@ class UpdateService {
         : Uri.parse('https://gitee.com/api/v5/repos/${ReleaseChannels.giteeRepo}/releases/latest');
     final json = await _getJson(url);
     if (json == null) return null;
-    return parseRelease(json, source);
+    return parseRelease(json, source, variant: await _buildVariant());
+  }
+
+  /// Which artefact this installation should update to.
+  ///
+  /// Resolved once and cached. An unreadable answer means standard, which is
+  /// the common case and the one that cannot break a device.
+  Future<BuildVariant> _buildVariant() async {
+    final cached = _variant;
+    if (cached != null) return cached;
+    final reported = await AppPlatform.buildVariant();
+    final resolved = reported == 'legacy'
+        ? BuildVariant.legacy
+        : BuildVariant.standard;
+    _variant = resolved;
+    return resolved;
   }
 
   Future<Map<String, Object?>?> _getJson(Uri url) async {
@@ -151,12 +186,16 @@ class UpdateService {
   /// fields for everything this app needs, so one parser covers both. Public
   /// and static so the shapes can be tested without a network.
   @visibleForTesting
-  static ReleaseInfo? parseRelease(Map<String, Object?> json, ReleaseSource source) {
+  static ReleaseInfo? parseRelease(
+    Map<String, Object?> json,
+    ReleaseSource source, {
+    BuildVariant variant = BuildVariant.standard,
+  }) {
     final tag = json['tag_name'] as String?;
     final version = AppVersion.tryParse(tag);
     if (version == null) return null;
 
-    final asset = _pickApk(json['assets']);
+    final asset = pickApk(json['assets'], variant: variant);
     final published = json['published_at'] ?? json['created_at'];
     final notes = (json['body'] as String?)?.trim();
 
@@ -171,14 +210,37 @@ class UpdateService {
     );
   }
 
-  /// Prefer a universal build, then arm64; anything else is better than nothing.
-  static Map<String, Object?>? _pickApk(Object? assets) {
+  /// Pick the APK that belongs to [variant].
+  ///
+  /// The legacy and standard builds are different artefacts, and updating one
+  /// into the other is worse than offering no update at all: a standard APK on
+  /// an old device white-screens, and a legacy APK drags a bundled Chromium
+  /// down the wire for everyone who does not need it. So the two are filtered
+  /// apart first, and only then ranked.
+  ///
+  /// Prefer a universal build, then arm64, then arm32; anything else is better
+  /// than nothing. Returns null when the release has no APK for this variant,
+  /// which is the honest answer rather than a wrong download.
+  @visibleForTesting
+  static Map<String, Object?>? pickApk(
+    Object? assets, {
+    BuildVariant variant = BuildVariant.standard,
+  }) {
     if (assets is! List<Object?>) return null;
-    final apks = assets
+    final all = assets
         .whereType<Map<String, Object?>>()
         .where((asset) => (asset['name'] as String? ?? '').toLowerCase().endsWith('.apk'))
         .toList();
+    if (all.isEmpty) return null;
+
+    bool isLegacy(Map<String, Object?> asset) =>
+        (asset['name'] as String? ?? '').toLowerCase().contains('legacy');
+
+    final apks = all
+        .where((asset) => isLegacy(asset) == (variant == BuildVariant.legacy))
+        .toList();
     if (apks.isEmpty) return null;
+
     for (final hint in const <String>['universal', 'arm64', 'armeabi']) {
       for (final apk in apks) {
         if ((apk['name'] as String? ?? '').toLowerCase().contains(hint)) return apk;

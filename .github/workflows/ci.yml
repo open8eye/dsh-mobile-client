@@ -40,7 +40,7 @@ jobs:
       # the pull request that broke it, not on the day of a release.
       - name: Build APK
         working-directory: app
-        run: flutter build apk --release
+        run: flutter build apk --release --flavor standard
 
       - uses: actions/upload-artifact@v4
         with:

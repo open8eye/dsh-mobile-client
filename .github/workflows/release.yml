@@ -44,6 +44,7 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "asset=dsh-mobile-client-$version.apk" >> "$GITHUB_OUTPUT"
+          echo "legacy=dsh-mobile-client-$version-legacy.apk" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         working-directory: app
@@ -55,19 +56,40 @@ jobs:
           flutter analyze
           flutter test
 
-      - name: Build the release APK
+      # Two builds from one codebase, published side by side. The in-app updater
+      # tells them apart by name and never crosses them over.
+      #
+      # `standard` is the small app that reuses a newer WebView kernel already
+      # installed on the phone. `legacy` carries its own Chromium and is built
+      # 32-bit to match it, so it works on a device with nothing newer.
+      - name: Build the standard APK
         working-directory: app
         run: |
-          flutter build apk --release \
+          flutter build apk --release --flavor standard \
             --dart-define=DSH_GITHUB_REPO=${{ github.repository }} \
             --dart-define=DSH_GITEE_REPO=${{ vars.GITEE_REPO || github.repository }}
 
-      - name: Collect the artefact
+      # ~85 MB, so it is fetched here rather than committed. The legacy build
+      # needs the asset to exist; without it the flavour would produce an APK
+      # that cannot do the one thing it is for.
+      - name: Fetch the bundled WebView kernel
+        run: ./tools/fetch_webview_kernel.sh
+
+      - name: Build the legacy APK
+        working-directory: app
+        run: |
+          flutter build apk --release --flavor legacy --target-platform android-arm \
+            --dart-define=DSH_GITHUB_REPO=${{ github.repository }} \
+            --dart-define=DSH_GITEE_REPO=${{ vars.GITEE_REPO || github.repository }}
+
+      - name: Collect the artefacts
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp app/build/app/outputs/flutter-apk/app-release.apk \
+          cp app/build/app/outputs/flutter-apk/app-standard-release.apk \
              "dist/${{ steps.version.outputs.asset }}"
+          cp app/build/app/outputs/flutter-apk/app-legacy-release.apk \
+             "dist/${{ steps.version.outputs.legacy }}"
           ls -la dist
 
       - name: Write the release notes
@@ -117,9 +139,11 @@ jobs:
             exit 1
           fi
 
-          curl -sSf -X POST \
-            "https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/${release_id}/attach_files" \
-            -F "access_token=${GITEE_TOKEN}" \
-            -F "file=@dist/${{ steps.version.outputs.asset }}"
+          for asset in "dist/${{ steps.version.outputs.asset }}" "dist/${{ steps.version.outputs.legacy }}"; do
+            curl -sSf -X POST \
+              "https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/${release_id}/attach_files" \
+              -F "access_token=${GITEE_TOKEN}" \
+              -F "file=@${asset}"
+          done
 
           echo "mirrored to https://gitee.com/${GITEE_REPO}/releases"

@@ -49,6 +49,13 @@ class MainActivity : FlutterActivity() {
                     // it had to be swapped. Reported on every diagnostics run.
                     "webViewKernel" -> result.success(WebViewKernel.outcome())
 
+                    // Which build this is. The updater needs it: the legacy and
+                    // standard APKs are different artefacts with different
+                    // update paths, and crossing them breaks old devices.
+                    "buildVariant" -> result.success(
+                        if (WebViewKernel.bundledAsset(this) != null) "legacy" else "standard",
+                    )
+
                     "openAppInfo" -> {
                         val target = call.argument<String>("package") ?: packageName
                         result.success(

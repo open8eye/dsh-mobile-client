@@ -22,6 +22,29 @@ android {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
+    androidResources {
+        // The bundled WebView kernel is itself a zip, so deflating it saves
+        // nothing — but it costs a full inflate of ~85 MB the first time the
+        // app unpacks it. Stored, that unpack is a straight copy.
+        noCompress("apk")
+    }
+
+    // Two builds from one codebase.
+    //
+    // `standard` is the normal app: the system WebView, upgraded in-process to
+    // a newer kernel that happens to be installed.
+    //
+    // `legacy` carries its own kernel in assets/, so it works on a device with
+    // nothing newer installed and asks the user for nothing at all. The kernel
+    // is AOSP arm32 and the app is built 32-bit to match it — a 32-bit process
+    // runs fine on 64-bit hardware, and the arm32 kernel is less than half the
+    // size of the arm64 one.
+    flavorDimensions += "engine"
+    productFlavors {
+        create("standard") { dimension = "engine" }
+        create("legacy") { dimension = "engine" }
+    }
+
     defaultConfig {
         applicationId = "com.dshmobile.dsh_mobile_client"
         // 24 covers the plugins in use (mobile_scanner, flutter_secure_storage,
@@ -39,6 +62,22 @@ android {
             // publishing; the README explains how.
             signingConfig = signingConfigs.getByName("debug")
         }
+    }
+}
+
+// The legacy build has to run as a 32-bit process: its bundled kernel is arm32,
+// and a process cannot load a kernel built for the other width. Android chooses
+// the process ABI from the native libraries in the APK, so a stray arm64 library
+// from a plugin's AAR is enough to make the app start 64-bit — and then fail to
+// find a 64-bit Flutter engine that was never built. Dropping the other ABIs makes
+// the choice unambiguous, and saves a few megabytes besides.
+androidComponents {
+    onVariants(selector().withFlavor("engine", "legacy")) { variant ->
+        variant.packaging.jniLibs.excludes.addAll(
+            "**/arm64-v8a/**",
+            "**/x86_64/**",
+            "**/x86/**",
+        )
     }
 }
 

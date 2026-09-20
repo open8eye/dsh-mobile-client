@@ -135,6 +135,96 @@ void main() {
     });
   });
 
+  // The two builds are published side by side. Handing one to the other's user
+  // is worse than offering no update at all, so these are the tests that stop
+  // an old device from silently being sent a standard APK.
+  group('UpdateService.pickApk keeps the two builds apart', () {
+    List<Object?> bothBuilds() => <Object?>[
+          <String, Object?>{
+            'name': 'dsh-mobile-client-1.0.0.apk',
+            'browser_download_url': 'https://example.com/standard.apk',
+          },
+          <String, Object?>{
+            'name': 'dsh-mobile-client-1.0.0-legacy.apk',
+            'browser_download_url': 'https://example.com/legacy.apk',
+          },
+        ];
+
+    test('a standard install is never offered the legacy APK', () {
+      final picked = UpdateService.pickApk(bothBuilds())!;
+      expect(picked['browser_download_url'], 'https://example.com/standard.apk');
+    });
+
+    test('a legacy install is never offered the standard APK', () {
+      final picked = UpdateService.pickApk(
+        bothBuilds(),
+        variant: BuildVariant.legacy,
+      )!;
+      expect(picked['browser_download_url'], 'https://example.com/legacy.apk');
+    });
+
+    test('the order the assets arrive in does not matter', () {
+      // The old picker fell through to "first asset wins", so this is the case
+      // that used to send a legacy user a standard APK.
+      final reversed = bothBuilds().reversed.toList();
+      expect(
+        UpdateService.pickApk(reversed)!['browser_download_url'],
+        'https://example.com/standard.apk',
+      );
+      expect(
+        UpdateService.pickApk(reversed, variant: BuildVariant.legacy)!['browser_download_url'],
+        'https://example.com/legacy.apk',
+      );
+    });
+
+    test('a release with no APK for this variant yields nothing', () {
+      final standardOnly = <Object?>[
+        <String, Object?>{
+          'name': 'dsh-mobile-client-1.0.0.apk',
+          'browser_download_url': 'https://example.com/standard.apk',
+        },
+      ];
+      expect(
+        UpdateService.pickApk(standardOnly, variant: BuildVariant.legacy),
+        isNull,
+      );
+    });
+
+    test('an ABI hint still ranks within a variant', () {
+      final legacyAbis = <Object?>[
+        <String, Object?>{
+          'name': 'dsh-mobile-client-1.0.0-legacy-arm64-v8a.apk',
+          'browser_download_url': 'https://example.com/legacy-arm64.apk',
+        },
+        <String, Object?>{
+          'name': 'dsh-mobile-client-1.0.0-legacy-universal.apk',
+          'browser_download_url': 'https://example.com/legacy-universal.apk',
+        },
+      ];
+      expect(
+        UpdateService.pickApk(legacyAbis, variant: BuildVariant.legacy)!['browser_download_url'],
+        'https://example.com/legacy-universal.apk',
+      );
+    });
+
+    test('a release carrying only a legacy APK does not update a standard install', () {
+      final release = UpdateService.parseRelease(
+        <String, Object?>{
+          'tag_name': 'v1.0.0',
+          'assets': <Object?>[
+            <String, Object?>{
+              'name': 'dsh-mobile-client-1.0.0-legacy.apk',
+              'browser_download_url': 'https://example.com/legacy.apk',
+            },
+          ],
+        },
+        ReleaseSource.github,
+      )!;
+      expect(release.hasApk, isFalse);
+      expect(release.apkUrl, isNull);
+    });
+  });
+
   group('release channels', () {
     test('default to the project repository on both hosts', () {
       expect(ReleaseChannels.githubRepo, isNotEmpty);
