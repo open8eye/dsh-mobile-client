@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../../core/dsh/address_probe.dart';
 import '../../core/dsh/dsh_endpoint.dart';
 import '../../core/i18n/l10n.dart';
 import '../../core/models/dsh_device.dart';
@@ -150,6 +151,15 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  /// Which address each live session actually connected through.
+  ///
+  /// Decided by a probe when the session opens, and deliberately not
+  /// persisted: the answer depends on where the phone is right now, so a
+  /// stored answer would be wrong exactly when it mattered.
+  final Map<String, String> _resolvedUrls = <String, String>{};
+
+  final AddressProbe _probe = AddressProbe();
+
   /// Bring a device up as a live session and make it the one on screen.
   Future<void> _openSession(DshDevice device, {bool switchTo = true}) async {
     final devices = context.read<DeviceController>();
@@ -159,12 +169,14 @@ class _HomeShellState extends State<HomeShell> {
     // without it lands on the login page and asks for a PIN that is already in
     // the keystore.
     final password = await devices.passwordFor(device.id);
+    final resolved = await _resolveAddress(device);
     if (!mounted) return;
 
     setState(() {
       final dropped = _sessions.open(device.id);
       _keys.putIfAbsent(device.id, () => GlobalKey<DshWebViewState>());
       _passwords[device.id] = password;
+      _resolvedUrls[device.id] = resolved;
       _forget(dropped);
       if (switchTo) _page = _pageSession;
     });
@@ -173,11 +185,25 @@ class _HomeShellState extends State<HomeShell> {
     await settings.setActiveDeviceId(device.id);
   }
 
+  /// Pick one of the device's addresses to load.
+  ///
+  /// A device with a single address — which is most of them — is returned
+  /// untouched, so this costs nothing in the common case. With two, the probe
+  /// races them and the loser is never loaded at all.
+  Future<String> _resolveAddress(DshDevice device) async {
+    final candidates = device.candidates;
+    if (candidates.length == 1) return candidates.first;
+    // Falling back to the primary lets the WebView show its own, far more
+    // specific failure page when nothing answers.
+    return await _probe.firstReachable(candidates) ?? candidates.first;
+  }
+
   /// Drop the bookkeeping for sessions that are no longer alive.
   void _forget(List<String> ids) {
     for (final id in ids) {
       _keys.remove(id);
       _passwords.remove(id);
+      _resolvedUrls.remove(id);
     }
   }
 
@@ -270,14 +296,23 @@ class _HomeShellState extends State<HomeShell> {
     if (device == null) {
       // A scan that carried `?token=` never reaches this form; it is added
       // with its password already in hand by _onScanned.
-      final added = await devices.addFromEndpoint(result.endpoint, name: result.name);
+      final added = await devices.addFromEndpoint(
+        result.endpoint,
+        name: result.name,
+        altBaseUrl: result.altBaseUrl,
+      );
       if (!mounted) return;
       await _openSession(added);
       if (mounted) _snack(context.tr('deviceAdded'));
       return;
     }
 
-    await devices.updateDevice(device.id, endpoint: result.endpoint, name: result.name);
+    await devices.updateDevice(
+      device.id,
+      endpoint: result.endpoint,
+      name: result.name,
+      altBaseUrl: result.altBaseUrl,
+    );
     if (result.clearPassword) {
       // After updateDevice, so the record it just wrote cannot put the flag
       // back. The live session rebuilds with no password and lands on the
@@ -424,6 +459,7 @@ class _HomeShellState extends State<HomeShell> {
           DshWebView(
             key: _keys[device.id],
             device: device,
+            resolvedBaseUrl: _resolvedUrls[device.id],
             password: _passwords[device.id],
             settings: settings.settings,
             lifecycle: lifecycle,

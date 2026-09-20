@@ -113,6 +113,15 @@ class _DeviceTile extends StatelessWidget {
                 style: theme.textTheme.bodySmall,
               ),
             ),
+            // The address shown is the primary one; this says there is
+            // another, and that the app picks between them on its own.
+            if (device.altBaseUrls.isNotEmpty) ...<Widget>[
+              const SizedBox(width: 6),
+              Tooltip(
+                message: context.tr('altAddressBadge'),
+                child: Icon(Icons.swap_horiz, size: 14, color: theme.colorScheme.outline),
+              ),
+            ],
             if (lastConnected.isNotEmpty) ...<Widget>[
               const SizedBox(width: 8),
               Text('· $lastConnected', style: theme.textTheme.bodySmall),

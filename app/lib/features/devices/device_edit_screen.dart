@@ -9,11 +9,16 @@ class DeviceFormResult {
   const DeviceFormResult({
     required this.endpoint,
     required this.name,
+    this.altBaseUrl = '',
     this.clearPassword = false,
   });
 
   final DshEndpoint endpoint;
   final String name;
+
+  /// The server's other address, or an empty string for none. Always present,
+  /// so an emptied field means "clear it" rather than "no opinion".
+  final String altBaseUrl;
 
   /// The user asked to forget the access password stored for this device.
   final bool clearPassword;
@@ -48,6 +53,11 @@ class _DeviceEditScreenState extends State<DeviceEditScreen> {
   late final TextEditingController _address = TextEditingController(
     text: widget.device?.baseUrl ?? widget.initialAddress ?? '',
   );
+  late final TextEditingController _alt = TextEditingController(
+    text: (widget.device?.altBaseUrls.isNotEmpty ?? false)
+        ? widget.device!.altBaseUrls.first
+        : '',
+  );
   late final TextEditingController _name =
       TextEditingController(text: widget.device?.name ?? '');
 
@@ -55,10 +65,12 @@ class _DeviceEditScreenState extends State<DeviceEditScreen> {
   /// save, so backing out of the screen changes nothing.
   bool _clearPassword = false;
   String? _addressError;
+  String? _altError;
 
   @override
   void dispose() {
     _address.dispose();
+    _alt.dispose();
     _name.dispose();
     super.dispose();
   }
@@ -78,10 +90,28 @@ class _DeviceEditScreenState extends State<DeviceEditScreen> {
       setState(() => _addressError = context.tr('addressInvalid'));
       return;
     }
+
+    var alt = _alt.text.trim();
+    if (alt.isNotEmpty) {
+      final parsedAlt = DshEndpoint.tryParse(alt);
+      if (parsedAlt == null) {
+        setState(() => _altError = context.tr('altAddressInvalid'));
+        return;
+      }
+      if (parsedAlt.baseUrl == endpoint.baseUrl) {
+        setState(() => _altError = context.tr('altAddressSame'));
+        return;
+      }
+      // Stored normalised, so the probe and the dedupe both compare like
+      // with like.
+      alt = parsedAlt.baseUrl;
+    }
+
     Navigator.of(context).pop(
       DeviceFormResult(
         endpoint: endpoint,
         name: _name.text.trim(),
+        altBaseUrl: alt,
         clearPassword: _clearPassword,
       ),
     );
@@ -116,6 +146,23 @@ class _DeviceEditScreenState extends State<DeviceEditScreen> {
               ),
               onChanged: (_) {
                 if (_addressError != null) setState(() => _addressError = null);
+              },
+            ),
+            const SizedBox(height: 20),
+            TextFormField(
+              controller: _alt,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              decoration: InputDecoration(
+                labelText: context.tr('altAddressLabel'),
+                hintText: context.tr('altAddressHint'),
+                border: const OutlineInputBorder(),
+                errorText: _altError,
+                helperText: context.tr('altAddressHelp'),
+                helperMaxLines: 3,
+              ),
+              onChanged: (_) {
+                if (_altError != null) setState(() => _altError = null);
               },
             ),
             const SizedBox(height: 20),

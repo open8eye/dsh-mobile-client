@@ -86,12 +86,17 @@ class DeviceController extends ChangeNotifier {
   /// Re-adding an address that already exists updates that entry instead of
   /// creating a duplicate, which is what a second scan of the same QR code
   /// should do.
+  ///
+  /// [altBaseUrl] is the server's other address. Pass `null` to leave whatever
+  /// is stored alone — a scan knows nothing about it — or an empty string to
+  /// clear it, which is what the edit form means by an empty field.
   Future<DshDevice> addFromEndpoint(
     DshEndpoint endpoint, {
     String? name,
     String? password,
+    String? altBaseUrl,
   }) async {
-    final existing = _findByBaseUrl(endpoint.baseUrl);
+    final existing = _findByAddress(endpoint.baseUrl);
     final resolvedName = (name != null && name.trim().isNotEmpty)
         ? name.trim()
         : (existing?.name ?? DshDevice.defaultNameFor(endpoint.host, endpoint.kind));
@@ -106,6 +111,9 @@ class DeviceController extends ChangeNotifier {
       name: resolvedName,
       baseUrl: endpoint.baseUrl,
       kind: endpoint.kind,
+      altBaseUrls: altBaseUrl == null
+          ? (existing?.altBaseUrls ?? const <String>[])
+          : _alternatesFor(altBaseUrl, endpoint.baseUrl),
       hasPassword: hasPassword,
       lastConnectedAt: existing?.lastConnectedAt,
       createdAt: existing?.createdAt ?? DateTime.now(),
@@ -142,6 +150,7 @@ class DeviceController extends ChangeNotifier {
     String deviceId, {
     required DshEndpoint endpoint,
     required String name,
+    required String altBaseUrl,
   }) async {
     final existing = byId(deviceId);
     if (existing == null) return;
@@ -149,6 +158,7 @@ class DeviceController extends ChangeNotifier {
       name: name.trim().isEmpty ? existing.name : name.trim(),
       baseUrl: endpoint.baseUrl,
       kind: endpoint.kind,
+      altBaseUrls: _alternatesFor(altBaseUrl, endpoint.baseUrl),
     ));
     await _persist();
   }
@@ -185,11 +195,22 @@ class DeviceController extends ChangeNotifier {
     await _persist();
   }
 
-  DshDevice? _findByBaseUrl(String baseUrl) {
+  /// Any of a device's addresses identifies it, so scanning the Tailscale QR
+  /// of a server that was added by its LAN address does not create a second
+  /// entry for the same machine.
+  DshDevice? _findByAddress(String baseUrl) {
     for (final device in _devices) {
-      if (device.baseUrl == baseUrl) return device;
+      if (device.candidates.contains(baseUrl)) return device;
     }
     return null;
+  }
+
+  /// At most one alternate, never blank, and never a duplicate of the primary
+  /// — a device that lists the same address twice would just probe it twice.
+  static List<String> _alternatesFor(String altBaseUrl, String primary) {
+    final trimmed = altBaseUrl.trim();
+    if (trimmed.isEmpty || trimmed == primary) return const <String>[];
+    return <String>[trimmed];
   }
 
   void _replace(DshDevice? device) {

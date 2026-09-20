@@ -32,6 +32,7 @@ class DshDevice {
     required this.name,
     required this.baseUrl,
     required this.kind,
+    this.altBaseUrls = const <String>[],
     this.hasPassword = false,
     this.lastConnectedAt,
     this.createdAt,
@@ -49,11 +50,26 @@ class DshDevice {
 
   final DshAccessKind kind;
 
+  /// Other addresses the same server answers on.
+
+  /// A DSH server usually has more than one way in — a LAN address at home
+  /// and a Tailscale address everywhere else — and which one is usable
+  /// depends on where the phone is, not on anything the app can store. Both
+  /// are kept here and [candidates] is what the connect-time probe races, so
+  /// the user never has to switch addresses by hand.
+  ///
+  /// [baseUrl] stays the address the user typed or scanned, and the one the
+  /// device list shows.
+  final List<String> altBaseUrls;
+
   /// Whether a password is currently stored for this device.
   final bool hasPassword;
 
   final DateTime? lastConnectedAt;
   final DateTime? createdAt;
+
+  /// Every address worth trying, primary first.
+  List<String> get candidates => <String>[baseUrl, ...altBaseUrls];
 
   Uri get uri => Uri.parse(baseUrl);
 
@@ -81,6 +97,7 @@ class DshDevice {
     String? name,
     String? baseUrl,
     DshAccessKind? kind,
+    List<String>? altBaseUrls,
     bool? hasPassword,
     DateTime? lastConnectedAt,
     DateTime? createdAt,
@@ -90,6 +107,7 @@ class DshDevice {
       name: name ?? this.name,
       baseUrl: baseUrl ?? this.baseUrl,
       kind: kind ?? this.kind,
+      altBaseUrls: altBaseUrls ?? this.altBaseUrls,
       hasPassword: hasPassword ?? this.hasPassword,
       lastConnectedAt: lastConnectedAt ?? this.lastConnectedAt,
       createdAt: createdAt ?? this.createdAt,
@@ -101,6 +119,7 @@ class DshDevice {
         'name': name,
         'baseUrl': baseUrl,
         'kind': kind.name,
+        if (altBaseUrls.isNotEmpty) 'altBaseUrls': altBaseUrls,
         'hasPassword': hasPassword,
         if (lastConnectedAt != null) 'lastConnectedAt': lastConnectedAt!.toIso8601String(),
         if (createdAt != null) 'createdAt': createdAt!.toIso8601String(),
@@ -119,6 +138,7 @@ class DshDevice {
         (value) => value.name == json['kind'],
         orElse: () => DshAccessKind.custom,
       ),
+      altBaseUrls: _stringList(json['altBaseUrls']),
       hasPassword: json['hasPassword'] == true,
       lastConnectedAt: _parseDate(json['lastConnectedAt']),
       createdAt: _parseDate(json['createdAt']),
@@ -127,6 +147,16 @@ class DshDevice {
 
   static DateTime? _parseDate(Object? value) =>
       value is String ? DateTime.tryParse(value) : null;
+
+  /// Absent on records written before alternate addresses existed, so this
+  /// has to tolerate anything.
+  static List<String> _stringList(Object? value) {
+    if (value is! List) return const <String>[];
+    return <String>[
+      for (final entry in value)
+        if (entry is String && entry.isNotEmpty) entry,
+    ];
+  }
 
   @override
   bool operator ==(Object other) => other is DshDevice && other.id == id;

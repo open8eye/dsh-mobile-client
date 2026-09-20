@@ -85,6 +85,48 @@ void main() {
       expect(DshDevice.fromJson(<String, Object?>{'id': 1}), isNull);
     });
 
+    test('round-trips the alternate address', () {
+      const device = DshDevice(
+        id: 'abc',
+        name: '书房台式机',
+        baseUrl: 'http://192.168.1.5:3081',
+        kind: DshAccessKind.lan,
+        altBaseUrls: <String>['http://100.111.56.77:3081'],
+      );
+      expect(DshDevice.fromJson(device.toJson())?.altBaseUrls,
+          <String>['http://100.111.56.77:3081']);
+      expect(device.candidates, <String>[
+        'http://192.168.1.5:3081',
+        'http://100.111.56.77:3081',
+      ]);
+    });
+
+    test('a record written before alternate addresses existed still loads', () {
+      // The whole point of the field being optional: an upgrade must not
+      // lose the devices the user already had.
+      final restored = DshDevice.fromJson(<String, Object?>{
+        'id': 'abc',
+        'name': '书房台式机',
+        'baseUrl': 'http://192.168.1.5:3081',
+        'kind': 'lan',
+        'hasPassword': true,
+      });
+      expect(restored, isNotNull);
+      expect(restored!.altBaseUrls, isEmpty);
+      expect(restored.candidates, <String>['http://192.168.1.5:3081']);
+    });
+
+    test('junk in the alternate list is dropped, not trusted', () {
+      final restored = DshDevice.fromJson(<String, Object?>{
+        'id': 'abc',
+        'name': 'a',
+        'baseUrl': 'http://192.168.1.5:3081',
+        'kind': 'lan',
+        'altBaseUrls': <Object?>[1, '', 'http://ok:3081', null],
+      });
+      expect(restored!.altBaseUrls, <String>['http://ok:3081']);
+    });
+
     test('reports the effective port for the default scheme', () {
       const device = DshDevice(
         id: 'a',

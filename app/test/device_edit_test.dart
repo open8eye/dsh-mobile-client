@@ -30,8 +30,9 @@ void main() {
       // into this form, and again when the session opened.
       await _open(tester, device: stored);
       expect(find.text('访问密码'), findsNothing);
-      expect(find.byType(TextFormField), findsNWidgets(2));
+      expect(find.byType(TextFormField), findsNWidgets(3));
       expect(find.text('服务器地址'), findsOneWidget);
+      expect(find.text('备用地址（可选）'), findsOneWidget);
       expect(find.text('设备昵称'), findsOneWidget);
     });
 
@@ -54,8 +55,65 @@ void main() {
       final result = await _open(tester, device: stored, save: true);
       expect(result, isNotNull);
       expect(result!.clearPassword, isFalse);
+      expect(result.altBaseUrl, '');
       expect(result.name, '书房台式机');
       expect(result.endpoint.baseUrl, 'http://192.168.1.5:3081');
+    });
+
+    testWidgets('an alternate address comes back normalised', (tester) async {
+      final result = await _open(
+        tester,
+        device: stored,
+        alt: 'http://100.111.56.77:3081/',
+        save: true,
+      );
+      expect(result!.altBaseUrl, 'http://100.111.56.77:3081');
+      expect(result.endpoint.baseUrl, 'http://192.168.1.5:3081');
+    });
+
+    testWidgets('an existing alternate address is shown back', (tester) async {
+      await _open(
+        tester,
+        device: stored.copyWith(altBaseUrls: const <String>['http://100.111.56.77:3081']),
+      );
+      expect(find.text('http://100.111.56.77:3081'), findsOneWidget);
+    });
+
+    testWidgets('the alternate may not repeat the main address', (tester) async {
+      final result = await _open(
+        tester,
+        device: stored,
+        alt: 'http://192.168.1.5:3081',
+        save: true,
+      );
+      expect(result, isNull, reason: 'the form should have stayed open');
+      expect(find.text('备用地址不能和主地址相同'), findsOneWidget);
+    });
+
+    testWidgets('an alternate that cannot be a DSH address is refused', (tester) async {
+      // Only http(s) reaches a DSH server; a bare host would be "valid"
+      // because the parser helpfully prepends a scheme, so the test uses a
+      // scheme that can never work.
+      final result = await _open(
+        tester,
+        device: stored,
+        alt: 'ftp://192.168.1.9:3081',
+        save: true,
+      );
+      expect(result, isNull, reason: 'the form should have stayed open');
+      expect(find.text('备用地址无效'), findsOneWidget);
+    });
+
+    testWidgets('clearing the alternate reports an empty string, not null', (tester) async {
+      // The difference matters: null means "no opinion", which is what a scan
+      // sends, and would leave a stale alternate in place.
+      final result = await _open(
+        tester,
+        device: stored.copyWith(altBaseUrls: const <String>['http://100.111.56.77:3081']),
+        alt: '',
+        save: true,
+      );
+      expect(result!.altBaseUrl, '');
     });
 
     testWidgets('clearing is only reported once the user asks for it', (tester) async {
@@ -87,6 +145,7 @@ Future<DeviceFormResult?> _open(
   WidgetTester tester, {
   required DshDevice? device,
   String? address,
+  String? alt,
   bool clear = false,
   bool undo = false,
   bool save = false,
@@ -120,6 +179,10 @@ Future<DeviceFormResult?> _open(
 
   if (address != null) {
     await tester.enterText(find.byType(TextFormField).first, address);
+    await tester.pump();
+  }
+  if (alt != null) {
+    await tester.enterText(find.byType(TextFormField).at(1), alt);
     await tester.pump();
   }
   if (clear) {

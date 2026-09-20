@@ -37,6 +37,7 @@ class DshWebView extends StatefulWidget {
     required this.settings,
     required this.lifecycle,
     required this.notificationService,
+    this.resolvedBaseUrl,
     this.isActive = true,
     this.onPasswordEntered,
     this.onTitleChanged,
@@ -44,6 +45,14 @@ class DshWebView extends StatefulWidget {
   });
 
   final DshDevice device;
+
+  /// The address this session actually connects through.
+  ///
+  /// A device can carry more than one address and the shell probes them when
+  /// the session opens, so this is whichever answered first. `null` means the
+  /// device's own primary address, which is also the fallback when nothing
+  /// answered.
+  final String? resolvedBaseUrl;
 
   /// Access password read from the keystore; `null` when none is stored.
   final String? password;
@@ -116,9 +125,11 @@ class DshWebViewState extends State<DshWebView> {
   /// that rebuild into a no-op.
   String? _promptAppliedPassword;
 
+  String get _baseUrl => widget.resolvedBaseUrl ?? widget.device.baseUrl;
+
   DshEndpoint get _endpoint =>
-      DshEndpoint.tryParse(widget.device.baseUrl) ??
-      DshEndpoint(baseUrl: widget.device.baseUrl, kind: widget.device.kind);
+      DshEndpoint.tryParse(_baseUrl) ??
+      DshEndpoint(baseUrl: _baseUrl, kind: widget.device.kind);
 
   /// Entry URL for this session.
   ///
@@ -166,6 +177,13 @@ class DshWebViewState extends State<DshWebView> {
     super.didUpdateWidget(oldWidget);
     Diagnostics.instance.registerSecret(widget.password);
     if (oldWidget.device.id != widget.device.id) {
+      _retriedWithStoredPassword = false;
+      _promptAppliedPassword = null;
+      _failure = null;
+      _load(_entryUrl);
+    } else if (oldWidget.resolvedBaseUrl != widget.resolvedBaseUrl) {
+      // Reconnecting picked a different address — the phone moved between the
+      // LAN and the tailnet. Nothing about the old page is worth keeping.
       _retriedWithStoredPassword = false;
       _promptAppliedPassword = null;
       _failure = null;

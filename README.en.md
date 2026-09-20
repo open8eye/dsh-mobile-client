@@ -39,6 +39,9 @@ A browser still makes that awkward:
   Manual address entry works too, and a share link carrying `?token=` needs no PIN at all.
 - **Device list** — multiple DSH servers; tap to switch, rename, edit or delete.
 - **Nicknames** — each device has a name, shown in the middle of the bottom bar.
+- **Two addresses per device** — store an alternate address (usually the Tailscale one)
+  alongside the main one. Both are probed at connect time and the one that answers first is
+  used: LAN at home, Tailscale elsewhere, with no manual switching.
 - **Several devices at once** — each connected device keeps its session alive (up to four),
   so switching is instant: no reload, no logging in again.
 - **Icon-only navigation** — Scan / Sessions / Device name / Devices / Settings / Refresh.
@@ -116,7 +119,9 @@ Download the APK from [Releases](../../releases), or build it yourself (see belo
 
 1. Open the app, tap **Scan** in the bottom bar;
 2. Scan the **LAN QR code** on the Phone access page;
-3. The address is pre-filled — give the device a nickname and save;
+3. The address is pre-filled — give the device a nickname. If the machine has another way in
+   (its Tailscale address, say), put it in **Alternate address** and the app will pick
+   whichever answers. Save;
 4. When the page asks for the password, the app prompts for it — enter the **8-character PIN**
    shown on the computer;
 5. From then on the app opens straight into DSH — **no more typing the PIN**.
@@ -142,6 +147,17 @@ To reach the computer over 4G without exposing DSH to the internet, Tailscale is
 3. Connect the app to `http://100.x.y.z:3081` with that LAN PIN.
 
 Traffic stays inside your tailnet and never touches a third-party public entry point.
+
+> **Do not go through Tailscale at home.** Once step 2 points the "LAN address" at the
+> Tailscale address, the QR code carries `100.x.y.z` — so at home, on the same Wi-Fi, the
+> traffic still goes through Tailscale. No manual switching needed: set the main address to
+> `http://192.168.x.x:3081` and the **alternate address** to `http://100.x.y.z:3081`. Both are
+> probed at once and whichever answers first wins.
+>
+> **If it is always slow**, it is probably not getting a direct path and is relaying through
+> Tailscale's DERP servers, which are all outside mainland China. Run
+> `tailscale ping <phone>` on the computer: `direct` is good, `via DERP(...)` is the problem.
+> Enabling UPnP / NAT-PMP on the router makes a direct path much more likely.
 
 ## Desktop companion
 
