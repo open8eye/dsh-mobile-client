@@ -363,6 +363,10 @@ class DshWebViewState extends State<DshWebView> {
         source: WebNotificationScript.probeLoginForm,
       );
       if (result == 'login') {
+        // The one step of the connect story that used to leave no trace at
+        // all, which made "the PIN was rejected" and "the PIN was never
+        // sent" look identical in a report.
+        Diagnostics.instance.info('WebView', 'login page shown by the server');
         await _handleLoginRequired();
       }
     } on Exception {
@@ -400,22 +404,44 @@ class DshWebViewState extends State<DshWebView> {
   Future<void> _handleLoginRequired() async {
     // A session the user is not looking at must not throw a dialog over the
     // one they are reading. It waits until it is brought to the front.
-    if (!widget.isActive) return;
+    if (!widget.isActive) {
+      Diagnostics.instance.debug(
+        'WebView',
+        'login page, but this session is not on screen; waiting to be brought forward',
+      );
+      return;
+    }
     final stored = widget.password;
     if (stored != null && stored.isNotEmpty && !_retriedWithStoredPassword) {
       _retriedWithStoredPassword = true;
+      Diagnostics.instance.info('WebView', 'login page: retrying once with the stored PIN');
       await _load(_endpoint.authenticatedUrl(stored));
       return;
     }
     if (_promptVisible || !mounted) return;
     _promptVisible = true;
+    Diagnostics.instance.info(
+      'WebView',
+      stored == null || stored.isEmpty
+          ? 'login page: no PIN stored for this device; asking the user'
+          : 'login page: the stored PIN was already tried; asking the user',
+    );
     final entered = await showDialog<String>(
       context: context,
       barrierDismissible: false,
       builder: (context) => _PasswordPromptDialog(device: widget.device),
     );
     _promptVisible = false;
-    if (entered == null || entered.isEmpty) return;
+    if (entered == null || entered.isEmpty) {
+      Diagnostics.instance.info('WebView', 'PIN prompt dismissed without an answer');
+      return;
+    }
+    // The length, never the PIN: enough to spot a truncated paste, useless to
+    // anyone reading the report.
+    Diagnostics.instance.info(
+      'WebView',
+      'PIN entered (${entered.length} characters); signing in',
+    );
     // Recorded before the save, because saving is what rebuilds this widget
     // with the new password — and that rebuild must not navigate again.
     // Without a callback nothing rebuilds, so there is nothing to suppress.
