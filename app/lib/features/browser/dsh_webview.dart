@@ -37,6 +37,7 @@ class DshWebView extends StatefulWidget {
     required this.settings,
     required this.lifecycle,
     required this.notificationService,
+    this.isActive = true,
     this.onPasswordEntered,
     this.onTitleChanged,
     super.key,
@@ -50,6 +51,13 @@ class DshWebView extends StatefulWidget {
   final AppSettings settings;
   final AppLifecycleObserver lifecycle;
   final NotificationService notificationService;
+
+  /// Whether this session is the one on screen.
+
+  /// Several sessions can be alive at once, and only one of them may ask the
+  /// user for anything: a PIN dialog raised by a session behind the current
+  /// one would land on top of a page the user is actually reading.
+  final bool isActive;
 
   /// Called when the user types the password in the in-app prompt.
   final Future<void> Function(String password)? onPasswordEntered;
@@ -153,6 +161,11 @@ class DshWebViewState extends State<DshWebView> {
       _load(_entryUrl);
     } else if (oldWidget.password != widget.password) {
       // A password was just saved from the prompt: retry immediately.
+      _retriedWithStoredPassword = false;
+      _load(_entryUrl);
+    } else if (!oldWidget.isActive && widget.isActive) {
+      // This session sat behind another one and was not allowed to prompt;
+      // now that it is on screen, give the stored password another go.
       _retriedWithStoredPassword = false;
       _load(_entryUrl);
     }
@@ -344,6 +357,9 @@ class DshWebViewState extends State<DshWebView> {
   }
 
   Future<void> _handleLoginRequired() async {
+    // A session the user is not looking at must not throw a dialog over the
+    // one they are reading. It waits until it is brought to the front.
+    if (!widget.isActive) return;
     final stored = widget.password;
     if (stored != null && stored.isNotEmpty && !_retriedWithStoredPassword) {
       _retriedWithStoredPassword = true;

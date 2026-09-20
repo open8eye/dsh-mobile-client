@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -8,6 +10,7 @@ import '../../core/models/dsh_device.dart';
 import '../../core/notifications/notification_service.dart';
 import '../../core/state/app_lifecycle.dart';
 import '../../core/state/device_controller.dart';
+import '../../core/state/session_set.dart';
 import '../../core/state/settings_controller.dart';
 import '../../core/state/update_controller.dart';
 import '../browser/dsh_webview.dart';
@@ -17,7 +20,11 @@ import '../devices/device_widgets.dart';
 import '../scanner/scan_screen.dart';
 import '../settings/settings_screen.dart';
 
-/// The four-tab shell: scan, current device, device list, settings.
+/// The shell: a stack of live sessions, with a bar of icons underneath.
+///
+/// The bar has six slots but only four of them are pages. The other two are
+/// actions — switching between sessions and reloading the current one — which
+/// is why there is no longer an AppBar above the WebView to hold them.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -26,13 +33,31 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
-  static const int _tabDevice = 1;
-  static const int _tabSettings = 3;
+  /// Pages in the [IndexedStack]. The bar's six slots map onto these.
+  static const int _pageScan = 0;
+  static const int _pageSession = 1;
+  static const int _pageDevices = 2;
+  static const int _pageSettings = 3;
 
-  int _index = _tabDevice;
-  final GlobalKey<DshWebViewState> _webViewKey = GlobalKey<DshWebViewState>();
-  String? _activePassword;
-  String? _lastActiveId;
+  /// How many sessions stay alive at once.
+  ///
+  /// Every live WebView keeps a Chromium renderer resident — tens of megabytes
+  /// each. On the old devices this app exists for, a handful is enough to get
+  /// the process killed, so the least recently used one is dropped.
+  static const int _maxSessions = 4;
+
+  int _page = _pageSession;
+
+  /// Which sessions are alive, and which one is on screen.
+  final SessionSet _sessions = SessionSet(maxSessions: _maxSessions);
+
+  /// One key per session, created when it opens and dropped when it closes.
+  final Map<String, GlobalKey<DshWebViewState>> _keys =
+      <String, GlobalKey<DshWebViewState>>{};
+
+  /// Passwords read from the keystore, so a rebuild does not re-read them.
+  final Map<String, String?> _passwords = <String, String?>{};
+
   DeviceController? _devices;
 
   @override
@@ -51,10 +76,14 @@ class _HomeShellState extends State<HomeShell> {
   Future<void> _bind() async {
     final devices = context.read<DeviceController>();
     _devices = devices;
-    _lastActiveId = devices.activeDeviceId;
     devices.addListener(_onDevicesChanged);
-    await _reloadPassword();
-    await _applyWakelock();
+
+    // Opening straight into the last-used device is the whole point of the
+    // app; the session count starting at 1 is the honest consequence.
+    final active = devices.activeDevice;
+    if (active != null) {
+      await _openSession(active, switchTo: false);
+    }
     await _autoCheckUpdates();
   }
 
@@ -82,45 +111,35 @@ class _HomeShellState extends State<HomeShell> {
         action: SnackBarAction(
           label: actionLabel,
           onPressed: () {
-            if (mounted) setState(() => _index = _tabSettings);
+            if (mounted) setState(() => _page = _pageSettings);
           },
         ),
       ),
     );
   }
 
+  /// A device that no longer exists cannot keep a session: its WebView would be
+  /// pointed at an entry the user has deleted.
   void _onDevicesChanged() {
     final devices = _devices;
     if (devices == null) return;
-    final id = devices.activeDeviceId;
-    if (id != _lastActiveId) {
-      _lastActiveId = id;
-      _reloadPassword();
-    }
+    final keep = devices.devices.map((device) => device.id).toSet();
+    if (_sessions.ids.every(keep.contains)) return;
+    // This fires from inside notifyListeners(), which can be mid-build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() => _forget(_sessions.retain(keep)));
+    });
   }
 
-  Future<void> _reloadPassword() async {
-    final devices = _devices;
-    if (devices == null) return;
-    final id = devices.activeDeviceId;
-    if (id == null) {
-      if (mounted) setState(() => _activePassword = null);
-      return;
-    }
-    final password = await devices.passwordFor(id);
-    if (!mounted) return;
-    setState(() => _activePassword = password);
-  }
-
+  /// Last state pushed to the platform, so a rebuild does not repeat the call.
   bool? _wakelockOn;
 
-  Future<void> _applyWakelock() async {
-    final settings = context.read<SettingsController>().settings;
-    _wakelockOn = null;
-    _syncWakelock(wanted: settings.keepScreenAwake);
-  }
-
   /// Idempotent: the platform is only touched when the desired state changes.
+  ///
+  /// Driven from [build] rather than set here, because whether the screen
+  /// should stay awake depends on which page is showing, not just on the
+  /// setting.
   void _syncWakelock({required bool wanted}) {
     if (_wakelockOn == wanted) return;
     _wakelockOn = wanted;
@@ -131,18 +150,108 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
-  Future<void> _selectDevice(DshDevice device) async {
+  /// Bring a device up as a live session and make it the one on screen.
+  Future<void> _openSession(DshDevice device, {bool switchTo = true}) async {
     final devices = context.read<DeviceController>();
     final settings = context.read<SettingsController>();
+
+    // Read the password *before* the WebView exists. A session that starts
+    // without it lands on the login page and asks for a PIN that is already in
+    // the keystore.
+    final password = await devices.passwordFor(device.id);
+    if (!mounted) return;
+
+    setState(() {
+      final dropped = _sessions.open(device.id);
+      _keys.putIfAbsent(device.id, () => GlobalKey<DshWebViewState>());
+      _passwords[device.id] = password;
+      _forget(dropped);
+      if (switchTo) _page = _pageSession;
+    });
+
     await devices.setActive(device.id);
     await settings.setActiveDeviceId(device.id);
-    if (mounted) setState(() => _index = _tabDevice);
+  }
+
+  /// Drop the bookkeeping for sessions that are no longer alive.
+  void _forget(List<String> ids) {
+    for (final id in ids) {
+      _keys.remove(id);
+      _passwords.remove(id);
+    }
+  }
+
+  /// Make an already-open session current, and show it.
+  void _activateSession(String id) {
+    setState(() {
+      if (_sessions.activate(id)) _page = _pageSession;
+    });
+    context.read<DeviceController>().setActive(_sessions.currentId);
+  }
+
+  /// Drop a session and let its WebView go.
+  void _closeSession(String id) {
+    setState(() {
+      if (_sessions.close(id)) _forget(<String>[id]);
+    });
+    context.read<DeviceController>().setActive(_sessions.currentId);
+  }
+
+  Future<void> _rememberPassword(String deviceId, String password) async {
+    final devices = context.read<DeviceController>();
+    final failure = await devices.setPassword(deviceId, password);
+    if (!mounted) return;
+    if (failure != null) {
+      _snack(context.tr('passwordSaveFailed'));
+      return;
+    }
+    setState(() => _passwords[deviceId] = password);
+  }
+
+  Future<void> _reloadCurrent() async {
+    final id = _sessions.currentId;
+    if (id == null) return;
+    await _keys[id]?.currentState?.reload();
+  }
+
+  /// The session picker: who is open, and which one is on screen.
+  Future<void> _showSessions() async {
+    final devices = context.read<DeviceController>();
+    final live = <DshDevice>[
+      for (final id in _sessions.ids.reversed)
+        if (devices.byId(id) case final DshDevice device) device,
+    ];
+    if (live.isEmpty) return;
+
+    final action = await showModalBottomSheet<_SessionAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => _SessionSheet(
+        devices: live,
+        currentId: _sessions.currentId,
+      ),
+    );
+    if (action == null || !mounted) return;
+    if (action.close) {
+      _closeSession(action.id);
+    } else {
+      _activateSession(action.id);
+    }
+  }
+
+  Future<void> _openCurrentConfig() async {
+    final id = _sessions.currentId;
+    final device = id == null ? null : context.read<DeviceController>().byId(id);
+    if (device == null) {
+      setState(() => _page = _pageDevices);
+      return;
+    }
+    await _openEditor(device: device);
   }
 
   /// Add/edit dialog. `device == null` adds; [initialAddress] pre-fills a scan.
   Future<void> _openEditor({DshDevice? device, String? initialAddress, String? initialPassword}) async {
     final devices = context.read<DeviceController>();
-    final settings = context.read<SettingsController>();
     final existingPassword =
         initialPassword ?? (device == null ? null : await devices.passwordFor(device.id));
 
@@ -159,17 +268,14 @@ class _HomeShellState extends State<HomeShell> {
     if (result == null || !mounted) return;
 
     if (device == null) {
-      await devices.addFromEndpoint(
+      final added = await devices.addFromEndpoint(
         result.endpoint,
         name: result.name,
         password: result.password,
       );
-      await settings.setActiveDeviceId(devices.activeDeviceId);
-      await _reloadPassword();
-      if (mounted) {
-        setState(() => _index = _tabDevice);
-        _snack(context.tr('deviceAdded'));
-      }
+      if (!mounted) return;
+      await _openSession(added);
+      if (mounted) _snack(context.tr('deviceAdded'));
       return;
     }
 
@@ -180,7 +286,9 @@ class _HomeShellState extends State<HomeShell> {
       password: result.password,
       passwordChanged: result.passwordChanged,
     );
-    await _reloadPassword();
+    if (result.passwordChanged) {
+      setState(() => _passwords[device.id] = result.password);
+    }
     if (!mounted) return;
     _snack(failure != null ? context.tr('passwordSaveFailed') : context.tr('deviceUpdated'));
   }
@@ -205,10 +313,10 @@ class _HomeShellState extends State<HomeShell> {
     );
     if (confirmed != true || !mounted) return;
     final devices = context.read<DeviceController>();
-    final settings = context.read<SettingsController>();
     await devices.remove(device.id);
-    await settings.setActiveDeviceId(devices.activeDeviceId);
-    await _reloadPassword();
+    if (!mounted) return;
+    // remove() already repointed activeDeviceId; keep the live set in step.
+    _closeSession(device.id);
   }
 
   /// A scanned QR code.
@@ -219,13 +327,10 @@ class _HomeShellState extends State<HomeShell> {
   Future<void> _onScanned(DshEndpoint endpoint) async {
     if (endpoint.password != null && endpoint.password!.isNotEmpty) {
       final devices = context.read<DeviceController>();
-      final settings = context.read<SettingsController>();
-      await devices.addFromEndpoint(endpoint, password: endpoint.password);
-      await settings.setActiveDeviceId(devices.activeDeviceId);
-      await _reloadPassword();
+      final added = await devices.addFromEndpoint(endpoint, password: endpoint.password);
       if (!mounted) return;
-      setState(() => _index = _tabDevice);
-      _snack(context.tr('deviceAdded'));
+      await _openSession(added);
+      if (mounted) _snack(context.tr('deviceAdded'));
       return;
     }
     await _openEditor(initialAddress: endpoint.baseUrl);
@@ -241,38 +346,40 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final devices = context.watch<DeviceController>();
-    final active = devices.activeDevice;
     final settings = context.watch<SettingsController>();
+    final currentId = _sessions.currentId;
+    final current = currentId == null ? null : devices.byId(currentId);
 
     // Keep the screen awake only while a session is actually on screen.
     // Applied here (rather than in a listener) because the condition depends on
-    // the selected tab as well; _syncWakelock makes the call idempotent so a
+    // the selected page as well; _syncWakelock makes the call idempotent so a
     // rebuild does not hammer the platform channel.
     _syncWakelock(
-      wanted: settings.settings.keepScreenAwake && _index == _tabDevice && active != null,
+      wanted: settings.settings.keepScreenAwake &&
+          _page == _pageSession &&
+          current != null,
     );
 
     return Scaffold(
       body: IndexedStack(
-        index: _index,
+        index: _page,
+        sizing: StackFit.expand,
         children: <Widget>[
-          // The camera is only alive while its tab is selected.
-          _index == 0
+          // The camera is only alive while its page is selected.
+          _page == _pageScan
               ? ScanScreen(
                   onScanned: _onScanned,
                   onManualEntry: () => _openEditor(),
                 )
               : const SizedBox.shrink(),
-          _DeviceTab(
-            webViewKey: _webViewKey,
-            device: active,
-            password: _activePassword,
-            onChooseDevice: () => setState(() => _index = 2),
-            onAddDevice: () => _openEditor(),
-            onEditDevice: (device) => _openEditor(device: device),
+          // No AppBar above the WebView, so the status bar has to be kept out
+          // of it here instead.
+          SafeArea(
+            bottom: false,
+            child: _buildSessions(devices, settings),
           ),
           DeviceListScreen(
-            onSelect: _selectDevice,
+            onSelect: _openSession,
             onAdd: () => _openEditor(),
             onEdit: (device) => _openEditor(device: device),
             onDelete: _deleteDevice,
@@ -280,114 +387,316 @@ class _HomeShellState extends State<HomeShell> {
           const SettingsScreen(),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (index) => setState(() => _index = index),
-        destinations: <Widget>[
-          NavigationDestination(
-            icon: const Icon(Icons.qr_code_scanner),
-            label: context.tr('tabScan'),
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.smartphone_outlined),
-            selectedIcon: const Icon(Icons.smartphone),
-            label: _navDeviceLabel(active, devices),
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.list_alt_outlined),
-            selectedIcon: const Icon(Icons.list_alt),
-            label: context.tr('tabDevices'),
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.settings_outlined),
-            selectedIcon: const Icon(Icons.settings),
-            label: context.tr('tabSettings'),
-          ),
-        ],
+      bottomNavigationBar: _BottomBar(
+        page: _page,
+        sessionCount: _sessions.length,
+        currentName: current?.name,
+        onScan: () => setState(() => _page = _pageScan),
+        onSessions: _showSessions,
+        onCurrentDevice: _openCurrentConfig,
+        onDevices: () => setState(() => _page = _pageDevices),
+        onSettings: () => setState(() => _page = _pageSettings),
+        onRefresh: current == null ? null : _reloadCurrent,
       ),
     );
   }
 
-  /// The tab is labelled with the device nickname, which is what the user
-  /// asked for: the device name lives in the navigation bar.
-  String _navDeviceLabel(DshDevice? device, DeviceController devices) {
-    if (device == null) return context.tr('tabDevice');
-    final name = device.name;
-    return name.length <= 8 ? name : '${name.substring(0, 7)}…';
+  Widget _buildSessions(DeviceController devices, SettingsController settings) {
+    final live = <DshDevice>[
+      for (final id in _sessions.ids)
+        if (devices.byId(id) case final DshDevice device) device,
+    ];
+    if (live.isEmpty) {
+      return _NoDeviceView(
+        onChooseDevice: () => setState(() => _page = _pageDevices),
+        onAddDevice: () => _openEditor(),
+      );
+    }
+
+    final lifecycle = context.read<AppLifecycleObserver>();
+    final notifications = context.read<NotificationService>();
+    final index = live.indexWhere((device) => device.id == _sessions.currentId);
+
+    return IndexedStack(
+      index: index < 0 ? live.length - 1 : index,
+      sizing: StackFit.expand,
+      children: <Widget>[
+        for (final device in live)
+          DshWebView(
+            key: _keys[device.id],
+            device: device,
+            password: _passwords[device.id],
+            settings: settings.settings,
+            lifecycle: lifecycle,
+            notificationService: notifications,
+            isActive: device.id == _sessions.currentId,
+            onPasswordEntered: (entered) => _rememberPassword(device.id, entered),
+          ),
+      ],
+    );
   }
 }
 
-/// The "current device" tab: either the WebView or a call to action.
-class _DeviceTab extends StatelessWidget {
-  const _DeviceTab({
-    required this.webViewKey,
-    required this.device,
-    required this.password,
-    required this.onChooseDevice,
-    required this.onAddDevice,
-    required this.onEditDevice,
-  });
+/// What the session sheet was asked to do.
+class _SessionAction {
+  const _SessionAction(this.id, {this.close = false});
 
-  final GlobalKey<DshWebViewState> webViewKey;
-  final DshDevice? device;
-  final String? password;
-  final VoidCallback onChooseDevice;
-  final VoidCallback onAddDevice;
-  final ValueChanged<DshDevice> onEditDevice;
+  final String id;
+  final bool close;
+}
+
+class _SessionSheet extends StatelessWidget {
+  const _SessionSheet({required this.devices, required this.currentId});
+
+  final List<DshDevice> devices;
+  final String? currentId;
 
   @override
   Widget build(BuildContext context) {
-    final current = device;
-    if (current == null) {
-      return _NoDeviceView(onChooseDevice: onChooseDevice, onAddDevice: onAddDevice);
-    }
-    final settings = context.watch<SettingsController>().settings;
-    final lifecycle = context.read<AppLifecycleObserver>();
-    final notifications = context.read<NotificationService>();
-    final devices = context.read<DeviceController>();
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: <Widget>[
-            Flexible(child: Text(current.name, overflow: TextOverflow.ellipsis)),
-            const SizedBox(width: 8),
-            DeviceKindChip(kind: current.kind),
-          ],
-        ),
-        actions: <Widget>[
-          IconButton(
-            tooltip: context.tr('refresh'),
-            icon: const Icon(Icons.refresh),
-            onPressed: () => webViewKey.currentState?.reload(),
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+            child: Text(
+              context.tr('sessionsTitle'),
+              style: theme.textTheme.titleMedium,
+            ),
           ),
-          IconButton(
-            tooltip: context.tr('openDeviceList'),
-            icon: const Icon(Icons.devices_other_outlined),
-            onPressed: onChooseDevice,
-          ),
-          IconButton(
-            tooltip: context.tr('editDeviceTitle'),
-            icon: const Icon(Icons.tune),
-            onPressed: () => onEditDevice(current),
-          ),
+          for (final device in devices)
+            ListTile(
+              leading: Icon(
+                device.id == currentId ? Icons.play_circle : Icons.circle_outlined,
+                color: device.id == currentId
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.outline,
+              ),
+              title: Text(device.name, overflow: TextOverflow.ellipsis),
+              subtitle: Align(
+                alignment: Alignment.centerLeft,
+                child: DeviceKindChip(kind: device.kind),
+              ),
+              trailing: IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: context.tr('sessionClose'),
+                onPressed: () =>
+                    Navigator.of(context).pop(_SessionAction(device.id, close: true)),
+              ),
+              onTap: () => Navigator.of(context).pop(_SessionAction(device.id)),
+            ),
+          const SizedBox(height: 8),
         ],
       ),
-      body: DshWebView(
-        key: webViewKey,
-        device: current,
-        password: password,
-        settings: settings,
-        lifecycle: lifecycle,
-        notificationService: notifications,
-        onPasswordEntered: (entered) async {
-          final failure = await devices.setPassword(current.id, entered);
-          if (failure != null && context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(context.tr('passwordSaveFailed'))),
-            );
-          }
-        },
+    );
+  }
+}
+
+/// The six-slot bar: four pages, one picker, one reload.
+///
+/// Icons only — the labels live in tooltips and semantics, which is also what
+/// keeps the row narrow enough for six slots on a small phone.
+class _BottomBar extends StatelessWidget {
+  const _BottomBar({
+    required this.page,
+    required this.sessionCount,
+    required this.currentName,
+    required this.onScan,
+    required this.onSessions,
+    required this.onCurrentDevice,
+    required this.onDevices,
+    required this.onSettings,
+    required this.onRefresh,
+  });
+
+  /// The name slot is a fixed width so that a long nickname cannot stretch the
+  /// bar and shift every icon next to it.
+  static const double _nameWidth = 88;
+
+  /// Floor for the five icon slots, so a narrow phone shrinks the name before
+  /// it squeezes an icon into an overflow.
+  static const double _iconSlot = 40;
+
+  final int page;
+  final int sessionCount;
+  final String? currentName;
+  final VoidCallback onScan;
+  final VoidCallback onSessions;
+  final VoidCallback onCurrentDevice;
+  final VoidCallback onDevices;
+  final VoidCallback onSettings;
+  final VoidCallback? onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surfaceContainer,
+      elevation: 3,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 64,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // Six slots on a 320dp phone: 96 for the name would leave the
+              // icons less room than they need, so the name gives way first.
+              final room = constraints.maxWidth - _iconSlot * 5;
+              final nameWidth = math.max(_iconSlot, math.min(_nameWidth, room));
+              return Row(
+                children: <Widget>[
+                  _BarAction(
+                    icon: Icons.qr_code_scanner,
+                    tooltip: context.tr('tabScan'),
+                    selected: page == 0,
+                    onTap: onScan,
+                  ),
+                  _BarAction(
+                    icon: Icons.layers_outlined,
+                    selectedIcon: Icons.layers,
+                    tooltip: context.tr('navSessions'),
+                    selected: page == 1,
+                    badge: sessionCount,
+                    onTap: onSessions,
+                  ),
+                  SizedBox(
+                    width: nameWidth,
+                    child: _NameSlot(
+                      name: currentName,
+                      tooltip: currentName == null
+                          ? context.tr('openDeviceList')
+                          : context.tr('editDeviceTitle'),
+                      onTap: onCurrentDevice,
+                    ),
+                  ),
+                  _BarAction(
+                    icon: Icons.list_alt_outlined,
+                    selectedIcon: Icons.list_alt,
+                    tooltip: context.tr('tabDevices'),
+                    selected: page == 2,
+                    onTap: onDevices,
+                  ),
+                  _BarAction(
+                    icon: Icons.settings_outlined,
+                    selectedIcon: Icons.settings,
+                    tooltip: context.tr('tabSettings'),
+                    selected: page == 3,
+                    onTap: onSettings,
+                  ),
+                  _BarAction(
+                    icon: Icons.refresh,
+                    tooltip: context.tr('refresh'),
+                    onTap: onRefresh,
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BarAction extends StatelessWidget {
+  const _BarAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.selectedIcon,
+    this.selected = false,
+    this.badge,
+  });
+
+  final IconData icon;
+  final IconData? selectedIcon;
+  final String tooltip;
+  final VoidCallback? onTap;
+  final bool selected;
+  final int? badge;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final enabled = onTap != null;
+    final Color color;
+    if (!enabled) {
+      color = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.38);
+    } else if (selected) {
+      color = theme.colorScheme.onSecondaryContainer;
+    } else {
+      color = theme.colorScheme.onSurfaceVariant;
+    }
+
+    Widget iconWidget = Icon(
+      selected && selectedIcon != null ? selectedIcon : icon,
+      color: color,
+    );
+    final count = badge;
+    if (count != null && count > 0) {
+      iconWidget = Badge.count(count: count, child: iconWidget);
+    }
+
+    return Expanded(
+      child: Tooltip(
+        message: tooltip,
+        child: InkResponse(
+          onTap: onTap,
+          radius: 30,
+          child: Center(
+            // A fixed box rather than padding: the indicator must never be
+            // wider than the slot it sits in, or six of them overflow.
+            child: Container(
+              width: 40,
+              height: 32,
+              alignment: Alignment.center,
+              decoration: selected
+                  ? BoxDecoration(
+                      color: theme.colorScheme.secondaryContainer,
+                      borderRadius: BorderRadius.circular(999),
+                    )
+                  : null,
+              child: iconWidget,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The device name, in the middle of the bar. Tapping it opens that device's
+/// settings — which is where the kind chip went when the AppBar was removed.
+class _NameSlot extends StatelessWidget {
+  const _NameSlot({required this.name, required this.tooltip, required this.onTap});
+
+  final String? name;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final label = name ?? context.tr('tabDevice');
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        child: Center(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: name == null
+                  ? theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6)
+                  : theme.colorScheme.onSurface,
+            ),
+          ),
+        ),
       ),
     );
   }

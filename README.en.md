@@ -38,8 +38,11 @@ A browser still makes that awkward:
 - **Scan to connect** — scan the QR code on the computer's Settings → Phone access page.
   Manual address entry works too, and a share link carrying `?token=` needs no PIN at all.
 - **Device list** — multiple DSH servers; tap to switch, rename, edit or delete.
-- **Nicknames** — each device has a name, shown right in the bottom navigation bar.
-- **Four-icon navigation** — Scan / Current device / Devices / Settings.
+- **Nicknames** — each device has a name, shown in the middle of the bottom bar.
+- **Several devices at once** — each connected device keeps its session alive (up to four),
+  so switching is instant: no reload, no logging in again.
+- **Icon-only navigation** — Scan / Sessions / Device name / Devices / Settings / Refresh.
+  The current device has no AppBar any more, so the page gets the whole screen.
 - **Notification forwarding** — page notifications become phone notifications, with an
   "only while in background" option.
 - **Automatic re-login** — the stored PIN is replayed whenever the session is rejected.

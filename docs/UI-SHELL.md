@@ -1,6 +1,6 @@
 # 界面骨架（导航栏改版）
 
-> 状态：**需求已定稿，尚未实现。** 设计问题已确认，见第四节。
+> 状态：**已实现。** 设计问题见第四节，实现取舍见第五节。
 
 ## 一、现在的样子
 
@@ -91,16 +91,31 @@
 | 「编辑设备」入口 | 就是上面这个——点名称进去配置 |
 | 去掉顶部的范围 | **只去掉「当前设备」这一页**；设备列表 / 设置 / 诊断 / 关于的标题栏保留（它们同时是返回入口） |
 
-## 五、涉及的文件
+## 五、实际改了什么
 
-| 文件 | 改什么 |
+| 文件 | 改动 |
 |---|---|
-| `app/lib/features/home/home_shell.dart` | 导航栏结构、去掉 AppBar、实例集合与切换 |
-| `app/lib/core/state/device_controller.dart` | `activeDeviceId` → `openDeviceIds` + 当前实例 |
-| `app/lib/features/browser/dsh_webview.dart` | 每个实例一份，各自一个 `GlobalKey` |
-| `app/lib/core/i18n/l10n.dart` | 导航栏不再显示文字后，`tabScan` / `tabDevices` / `tabSettings` 只剩 tooltip / 无障碍标签用；新增实例数的无障碍文案 |
-| `app/test/widget_test.dart` | 骨架的 widget 测试 |
-| `README.md` | 「四个图标的底部导航栏」那一行要改 |
+| `app/lib/features/home/home_shell.dart` | 去掉 AppBar；六个纯图标槽位；实例选择面板；每个会话一个 `DshWebView`，各自一个 `GlobalKey` |
+| `app/lib/core/state/session_set.dart` | **新增**。会话集合：LRU 顺序、上限淘汰、删除设备后的清理。纯逻辑，不碰 Flutter |
+| `app/lib/features/browser/dsh_webview.dart` | 新增 `isActive`：不在前台的会话不许弹密码框，否则会盖住用户正在看的页面 |
+| `app/lib/core/i18n/l10n.dart` | 新增 `navSessions` / `sessionsTitle` / `sessionClose`；`tabScan` 等只剩 tooltip 与无障碍标签用 |
+| `app/test/session_set_test.dart` | **新增**。19 个用例，覆盖排序、淘汰、关闭、删除设备四条路径 |
+| `README.md` / `README.en.md` / `docs/ARCHITECTURE.md` | 导航栏描述、会话保活说明、目录注释 |
+
+### 与最初设想的偏差
+
+- **会话集合没有放进 `DeviceController`，而是单独一个 `SessionSet`。** 它是纯 UI
+  会话状态：App 一重启就没有活着的 WebView 了，把它塞进一个负责持久化的
+  `ChangeNotifier` 里会让人以为它会被存下来。拆出来还有个好处——LRU 顺序是最容易
+  悄悄丢会话的地方，现在它可以脱离 Flutter 单测。
+- **上限 4，超了淘汰最久没看的那个。** 每个活着的 WebView 都常驻一个 Chromium
+  渲染进程，几十 MB 起步；在老机器上开三四个就可能被系统连整个 App 一起杀掉。
+- **密码在 WebView 创建之前读。** 否则会话会先落在登录页、弹一个「请输入密码」，
+  而密码其实就在密钥库里。
+- **启动时仍然自动打开上次的设备**（与改版前一致），所以实例数一开始就是 1。
+- 名称那一格 **88 逻辑像素**；屏幕太窄时按 `maxWidth - 5×40` 给图标让位，
+  免得六个槽位在 320dp 的机器上溢出。
+- `SessionSet` 的会话是**进程内**的：切换 App 前后台不受影响，杀进程后从 1 个重新开始。
 
 ## 六、顺带记下的其它意见
 

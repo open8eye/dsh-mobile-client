@@ -6,7 +6,8 @@
 
 ```
 App (Flutter)
- ├─ features/home/home_shell.dart      四图标导航；持有「当前设备」与它的密码
+ ├─ features/home/home_shell.dart      六图标导航；持有一组保活会话与它们的密码
+ │   └─ core/state/session_set.dart     会话集合：LRU 顺序 + 上限淘汰（纯逻辑，可单测）
  │   ├─ features/scanner               相机 → DshEndpoint
  │   ├─ features/browser/dsh_webview   WebView + JS 桥 + 自动重新登录
  │   ├─ features/devices               设备列表 / 增删改
