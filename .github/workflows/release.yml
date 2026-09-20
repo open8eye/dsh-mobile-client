@@ -134,29 +134,37 @@ jobs:
             exit 1
           fi
 
-          # The tag has to exist on Gitee too, or the release has nothing to
-          # point at.
+          # The tag normally reaches Gitee from the developer's own push, so
+          # this is a fallback and "it is already there" is not a failure.
           git remote add gitee "https://oauth2:${GITEE_TOKEN}@gitee.com/${GITEE_REPO}.git"
-          git push gitee "refs/tags/${GITHUB_REF_NAME}"
+          git push gitee "refs/tags/${GITHUB_REF_NAME}" \
+            || echo "::warning::could not push the tag to Gitee; assuming it is already there"
 
-          release_id=$(curl -sSf -X POST \
+          # Deliberately NOT `curl -f`. The response body is the only place
+          # Gitee says *why* it refused — missing scope on the token, wrong
+          # repository, a release that already exists. With -f every one of
+          # those collapses into "exit code 22", which is unactionable from a
+          # CI log and is exactly how this step failed the first time.
+          response=$(curl -sS -X POST \
             "https://gitee.com/api/v5/repos/${GITEE_REPO}/releases" \
             -d "access_token=${GITEE_TOKEN}" \
             -d "tag_name=${GITHUB_REF_NAME}" \
             -d "name=${GITHUB_REF_NAME}" \
-            -d "target_commitish=${GITHUB_SHA}" \
-            --data-urlencode "body@dist/notes.md" | jq -r '.id')
+            -d "target_commitish=${GITHUB_REF_NAME}" \
+            --data-urlencode "body@dist/notes.md" || true)
+          release_id=$(printf '%s' "$response" | jq -r '.id // empty' 2>/dev/null || true)
 
-          if [ -z "$release_id" ] || [ "$release_id" = "null" ]; then
-            echo "::error::Gitee did not return a release id"
+          if [ -z "$release_id" ]; then
+            echo "::error::Gitee refused the release: $response"
             exit 1
           fi
 
           for asset in "dist/${{ steps.version.outputs.asset }}" "dist/${{ steps.version.outputs.legacy }}"; do
-            curl -sSf -X POST \
+            attached=$(curl -sS -X POST \
               "https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/${release_id}/attach_files" \
               -F "access_token=${GITEE_TOKEN}" \
-              -F "file=@${asset}"
+              -F "file=@${asset}" || true)
+            echo "attach ${asset}: $(printf '%s' "$attached" | head -c 300)"
           done
 
           echo "mirrored to https://gitee.com/${GITEE_REPO}/releases"
