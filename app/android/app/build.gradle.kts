@@ -22,12 +22,17 @@ android {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
-    androidResources {
-        // The bundled WebView kernel is itself a zip, so deflating it saves
-        // nothing — but it costs a full inflate of ~85 MB the first time the
-        // app unpacks it. Stored, that unpack is a straight copy.
-        noCompress("apk")
-    }
+    // The bundled WebView kernel is deliberately NOT in noCompress.
+    //
+    // The first instinct is that deflating it saves nothing, because the
+    // kernel is itself a zip. It is wrong: the kernel's own entries are mostly
+    // *stored* (native libraries, dex), so it deflates well — 88.7 MB becomes
+    // 47.1 MB. That is the difference between the legacy build fitting a
+    // 100 MB upload limit and not fitting it at all.
+    //
+    // The cost is that unpacking it inflates instead of copying. That happens
+    // once per install, on the provider's thread, and the result is cached on
+    // disk afterwards — see WebViewKernel.bundledKernelFile.
 
     // Two builds from one codebase.
     //
