@@ -163,9 +163,9 @@ class L10n {
 
       'webViewTooOld': '系统 WebView 版本过低',
       'webViewTooOldHint1': '这台手机的系统 WebView 太旧，连网页脚本都解析不了（DSH 需要 Chromium 94 以上）。',
-      'webViewTooOldHint2': '这不是 App 的问题——升级系统 WebView 就能解决。',
-      'webViewTooOldHint3': '到应用商店搜索「Android System WebView」并更新它，小米应用商店和 Google Play 都可以。',
-      'webViewTooOldHint4': '更新后回到这里重试即可。如果确定你的 DSH 版本较旧，也可以直接点「重试」强行加载。',
+      'webViewTooOldHint2': 'App 会尝试自动改用手机上更新的内核，不需要 root，也不会替换系统 WebView 或影响其他应用。',
+      'webViewTooOldHint3': '如果这里仍然打不开，说明没找到可用的新内核。装一个完整版（不是应用商店的拆分安装包）的 Android System WebView 或 Chrome，然后重启 App。',
+      'webViewTooOldHint4': '直接升级系统 WebView 同样有效。如果确定你的 DSH 版本较旧，点「重试」可以强行加载。',
       'webViewOpenSettings': '打开 WebView 设置',
 
       'diagnosticsTitle': '诊断与反馈',
@@ -337,9 +337,9 @@ class L10n {
 
       'webViewTooOld': 'The system WebView is too old',
       'webViewTooOldHint1': 'This phone\'s system WebView cannot even parse the page\'s scripts; DSH needs Chromium 94 or newer.',
-      'webViewTooOldHint2': 'This is not an app bug — updating the system WebView fixes it.',
-      'webViewTooOldHint3': 'Search for "Android System WebView" in your app store and update it; Mi Store and Google Play both carry it.',
-      'webViewTooOldHint4': 'Come back and retry afterwards. If you know your DSH build is older, tapping Retry will load it anyway.',
+      'webViewTooOldHint2': 'The app automatically switches to a newer kernel installed on the phone — no root, and it never replaces the system WebView or affects other apps.',
+      'webViewTooOldHint3': 'If this still will not open, no usable kernel was found. Install a standalone (not a store split) Android System WebView or Chrome APK, then restart the app.',
+      'webViewTooOldHint4': 'Updating the system WebView works too. If you know your DSH build is older, Retry will load it anyway.',
       'webViewOpenSettings': 'Open WebView settings',
 
       'diagnosticsTitle': 'Diagnostics',

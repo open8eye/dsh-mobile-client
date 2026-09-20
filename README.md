@@ -235,7 +235,20 @@ App 因此做了两件事：
 1. **兼容 shim**：在页面脚本之前补齐 `Object.hasOwn`、`Array.prototype.at`、`String.prototype.at`、`String.prototype.replaceAll` 与 `crypto.randomUUID`。它们在 Chromium 85–93 的设备上是真的有用（那类设备语法没问题、只缺 API），在更新的设备上完全不生效。
 2. **版本闸门**：WebView 低于 Chromium 94 时直接给出说明页，而不是白屏。门槛取 94（`static {}`）而非 85（`??=`）是刻意的——只修运算符只会把解析错误往后推几 KB。
 
-低于 94 时**唯一的解法是升级系统 WebView**。把 bundle 改写到那个程度不是 shim，是转译器——`static {}` 没法在不理解所在类的情况下做文本改写。
+低于 94 时**唯一的解法是换一个更新的内核**。把 bundle 改写到那个程度不是 shim，是转译器——`static {}` 没法在不理解所在类的情况下做文本改写。
+
+### 自动改用手机上更新的内核
+
+App 会尝试**复用手机上已经安装的更新内核**，而不是要求用户去动系统。实现基于 [WebViewUpgrade](https://github.com/JonaNorman/WebViewUpgrade)（MIT）：它劫持 WebView provider 的 binder，让**本进程**从另一个已安装的包解析 WebView。
+
+**不替换系统 WebView、不影响其他应用、不需要 root**，用户卸载那个内核 App 即可撤销。
+
+两个约束决定了实现方式：
+
+- **时机**：provider 在进程内第一次创建 WebView 时就绑定，之后无法热切换。所以这段逻辑跑在 `WebViewKernelProvider`（一个 `ContentProvider`）的 `onCreate()` 里——它发生在 `bindApplication` 期间、`Application.onCreate()` **之前**，是唯一还来得及的窗口。已经创建过 WebView 再切换，需要冷启动 App 才生效。
+- **只有完整单体 APK 能作为内核**：Google Play 分发的 Chrome 和 Android System WebView 是 split 安装包，**用不了**。所以从商店装的 Chrome 即使版本够新也不会被采用，需要完整版 APK。
+
+没找到可用内核时不会白屏，而是给出说明页。Android 侧的 `MIN_CHROMIUM` 与 Dart 侧的 `CompatScript.minimumChromium` 有一个测试守着，防止两边漂移。
 
 还有一个方向相反的坑：`crypto.randomUUID` 要求**安全上下文**，而本 App 是刻意用明文 HTTP 连局域网地址的——所以它在**最新**的 WebView 上同样不存在。`crypto.getRandomValues` 没有这个限制，于是也被一并补上。
 

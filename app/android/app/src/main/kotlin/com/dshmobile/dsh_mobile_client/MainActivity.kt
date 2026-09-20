@@ -45,6 +45,10 @@ class MainActivity : FlutterActivity() {
 
                     "deviceInfo" -> result.success(deviceInfo())
 
+                    // Which kernel the process actually bound to, and whether
+                    // it had to be swapped. Reported on every diagnostics run.
+                    "webViewKernel" -> result.success(WebViewKernel.outcome())
+
                     "openAppInfo" -> {
                         val target = call.argument<String>("package") ?: packageName
                         result.success(
@@ -171,6 +175,9 @@ class MainActivity : FlutterActivity() {
             "incremental" to Build.VERSION.INCREMENTAL,
             "webViewPackage" to (webView?.packageName ?: "missing"),
             "webViewVersion" to (webView?.versionName ?: "unknown"),
+            // What the startup hook did, if anything. "not attempted" means the
+            // process never ran it, which is itself worth seeing.
+            "webViewKernel" to WebViewKernel.outcome(),
         )
     }
 

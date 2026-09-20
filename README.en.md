@@ -260,9 +260,33 @@ The app therefore does two things:
    floor is 94 (`static {}`) rather than 85 (`??=`) on purpose — patching the operators would only
    move the parse error a few kilobytes down the same file.
 
-Below 94 the **only** fix is updating the system WebView. Rewriting the bundle that far down is not
-a shim but a transpiler — `static {}` cannot be rewritten textually without understanding the
-class it sits in.
+Below 94 the **only** fix is a newer kernel. Rewriting the bundle that far down is not a shim but a
+transpiler — `static {}` cannot be rewritten textually without understanding the class it sits in.
+
+### Reusing a newer kernel already on the phone
+
+Rather than asking the user to modify their system, the app tries to **reuse a newer WebView kernel
+that is already installed**. This is built on
+[WebViewUpgrade](https://github.com/JonaNorman/WebViewUpgrade) (MIT), which hooks the WebView
+provider binders so that **this process** resolves its WebView from another installed package.
+
+It **does not replace the system WebView, does not affect other apps, and needs no root**. The user
+can undo it by uninstalling the kernel app.
+
+Two constraints shape how it is implemented:
+
+- **Timing.** The provider is bound the first time a WebView is created in the process and cannot be
+  swapped afterwards. The logic therefore runs in `WebViewKernelProvider` — a `ContentProvider` —
+  whose `onCreate` fires during `bindApplication`, strictly before `Application.onCreate`. That is
+  the only window that is still early enough. Switching after a WebView already exists needs a cold
+  start to take effect.
+- **Only a monolithic kernel APK works.** The split APKs Google Play delivers for Chrome and Android
+  System WebView **cannot** be used, so a store-installed Chrome will not be picked up even when it
+  is new enough; a standalone APK is required.
+
+When no usable kernel is found the app shows an explanation instead of a white page. A test guards
+the Android-side `MIN_CHROMIUM` against drifting from the Dart-side
+`CompatScript.minimumChromium`.
 
 There is a trap pointing the other way too: `crypto.randomUUID` requires a **secure context**, and
 this app deliberately talks to a LAN address over plain HTTP — so it is missing even on the

@@ -24,6 +24,21 @@ class AppPlatform {
     }
   }
 
+  /// What the Android startup hook did about the WebView kernel.
+  ///
+  /// Returns a human-readable sentence, or null on a platform that has no such
+  /// hook (iOS). It is a report, not a control: the swap has already happened
+  /// by the time Dart runs, or it never will for this process.
+  static Future<String?> webViewKernel() async {
+    try {
+      return await _channel.invokeMethod<String>('webViewKernel');
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
   /// Open the system's app-info page for [packageName], or for this app when
   /// it is null.
   ///

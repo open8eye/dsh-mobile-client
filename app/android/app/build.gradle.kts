@@ -44,6 +44,11 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // Reuse a newer WebView kernel that is already installed, for this process
+    // only, without touching the system WebView. MIT licensed; it hooks the
+    // provider binders, which is why it must run from a ContentProvider.
+    implementation("io.github.jonanorman.android.webviewup:core:0.1.0")
 }
 
 flutter {

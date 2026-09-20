@@ -68,6 +68,18 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!--
+          Swaps in a newer WebView kernel before anything can create a WebView.
+          A ContentProvider's onCreate fires during bindApplication — earlier
+          than Application.onCreate — and that is the only window in which the
+          provider can still be changed. Stores nothing, exposes nothing.
+        -->
+        <provider
+            android:name=".WebViewKernelProvider"
+            android:authorities="${applicationId}.webview-kernel"
+            android:exported="false"
+            android:initOrder="100" />
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
@@ -83,5 +95,15 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
         </intent>
+
+        <!--
+          WebView kernels we may switch to. Android 11+ hides unlisted packages
+          from us, and an invisible kernel is an unusable one.
+        -->
+        <package android:name="com.google.android.webview" />
+        <package android:name="com.google.android.webview.beta" />
+        <package android:name="com.google.android.webview.dev" />
+        <package android:name="com.google.android.webview.canary" />
+        <package android:name="com.android.chrome" />
     </queries>
 </manifest>

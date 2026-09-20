@@ -137,6 +137,10 @@ class DshWebViewState extends State<DshWebView> {
       ' · MIUI ${info['miui'] ?? '-'}'
       ' · WebView ${info['webViewPackage'] ?? '?'} ${info['webViewVersion'] ?? '?'}',
     );
+    final kernel = await AppPlatform.webViewKernel();
+    if (kernel != null && kernel.isNotEmpty) {
+      Diagnostics.instance.info('WebView', 'kernel: $kernel');
+    }
   }
 
   @override

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dsh_mobile_client/core/browser/compat_script.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -49,6 +51,22 @@ void main() {
       expect(CompatScript.isTooOld(null), isFalse);
       expect(CompatScript.isTooOld('unknown'), isFalse);
       expect(CompatScript.isTooOld(''), isFalse);
+    });
+  });
+
+  group('threshold parity with Android', () {
+    test('the Kotlin kernel threshold matches the Dart one', () {
+      // Dart decides whether to explain; Kotlin decides whether to swap in
+      // another kernel. If the two ever disagree, one of them is lying to the
+      // user, and nothing else in the build would notice.
+      final file = File(
+        'android/app/src/main/kotlin/com/dshmobile/dsh_mobile_client/WebViewKernel.kt',
+      );
+      expect(file.existsSync(), isTrue, reason: 'WebViewKernel.kt moved');
+      final match = RegExp(r'const val MIN_CHROMIUM = (\d+)')
+          .firstMatch(file.readAsStringSync());
+      expect(match, isNotNull, reason: 'MIN_CHROMIUM not found in WebViewKernel.kt');
+      expect(int.parse(match!.group(1)!), CompatScript.minimumChromium);
     });
   });
 }
