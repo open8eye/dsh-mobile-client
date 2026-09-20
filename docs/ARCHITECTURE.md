@@ -98,3 +98,30 @@ PetOverlayService (前台服务, specialUse)
 | 新的通知来源 | `WebNotificationScript.source` + `_handleNotification` |
 | 加语言 | `core/i18n/l10n.dart` 的 `_table` |
 | 换存储后端（如 sqlite） | `core/storage/*`，控制器只依赖接口 |
+| 补一个浏览器 API 垫片 | `core/browser/compat_script.dart` 的 `source`，并在 `tools/compat_check.mjs` 里加对比 |
+| 换内置内核版本 | `tools/fetch_webview_kernel.sh` 的环境变量，或 `WebViewKernel.kt` 的候选表 |
+
+## 七、WebView 兼容层
+
+页面跑不起来有两个**互不相同**的原因，混在一起会白修半天：
+
+| | 症状 | 能不能救 |
+|---|---|---|
+| **语法**太新 | 整个 bundle **一行都不执行**，页面纯白、控制台只有一条 `SyntaxError` | 不能。垫片是运行时补的，解析不过就没有运行时 |
+| **API** 太新 | 页面渲染出来，然后在某次调用上抛 `TypeError`，通常是「能看不能用」 | 能，只要补的那个 API 语义正确 |
+
+两道门槛因此分开记：
+
+- `CompatScript.minimumChromium = 94`：`static {}` 的语法门槛，**低于它只能换内核**。
+- 垫片覆盖的 API 门槛：目前最高是 `Symbol.dispose` 的 134，但对 DSH 真正致命的是
+  `AbortSignal.any`（116）与 `Promise.withResolvers`（119）——见 README 的「能解析不等于能跑」。
+
+三个实现约束：
+
+- **注入时机**：`UserScriptInjectionTime.AT_DOCUMENT_START`，必须早于页面自己的脚本。
+- **回报通道**：垫片跑的时候 Flutter 桥还不存在，直接调用会丢。所以结果先停在
+  `window.__dshCompatReport`，由随后注入的 `DiagnosticsScript` 转发出去。
+- **只补缺的**：每个垫片先检测原生实现（`ensure()`），新引擎上一个字节都不改。
+
+垫片**正确性**不能靠读代码确认。`tools/compat_check.mjs` 把原生实现删掉、换成垫片、逐项对比
+结果，覆盖到 `Object.hasOwn` 这类「写错就静默出错」的 API。它是差分测试，所以需要 Node 24+。

@@ -233,8 +233,6 @@ DSH 的前端由 Vite 构建。Vite 只把**语法**降级到它配置的目标�
 |---|---|
 | 私有方法 `#name() {}` | 84 |
 | `??=` / `\|\|=` / `&&=` | 85 |
-| `Array.prototype.at`（运行时 API） | 92 |
-| `Object.hasOwn`（运行时 API） | 93 |
 | `static {}` 初始化块 | **94** |
 
 **真正卡住的是语法，不是 API。** 语法错误意味着整个文件**一行都不会执行**——shim 再全也救不了。
@@ -249,10 +247,52 @@ uncaught: Uncaught SyntaxError: Unexpected token '=' @ .../assets/index-DS_0SByp
 
 App 因此做了两件事：
 
-1. **兼容 shim**：在页面脚本之前补齐 `Object.hasOwn`、`Array.prototype.at`、`String.prototype.at`、`String.prototype.replaceAll` 与 `crypto.randomUUID`。它们在 Chromium 85–93 的设备上是真的有用（那类设备语法没问题、只缺 API），在更新的设备上完全不生效。
+1. **兼容 shim**：在页面脚本之前补齐 bundle 用到的运行时 API（清单见下一节）。它们在旧引擎上是真的有用（那类设备语法没问题、只缺 API），在够新的引擎上完全不生效。
 2. **版本闸门**：WebView 低于 Chromium 94 时直接给出说明页，而不是白屏。门槛取 94（`static {}`）而非 85（`??=`）是刻意的——只修运算符只会把解析错误往后推几 KB。
 
 低于 94 时**唯一的解法是换一个更新的内核**。把 bundle 改写到那个程度不是 shim，是转译器——`static {}` 没法在不理解所在类的情况下做文本改写。
+
+### 能解析不等于能跑
+
+第二份现场报告来自同一个用户、同一个机型，这次跑的是**内置内核**：
+
+```
+webViewKernel: upgraded kernel: bundled webview/armeabi-v7a.apk (now 113.0.5672.136)
+loaded http://100.111.56.77:3081/
+```
+
+Chromium 113 解析得了、也挂载了，页面却连不上：
+
+```
+Uncaught TypeError: Promise.withResolvers is not a function @ http://100.111.56.77:3081/:47:65
+[session-controller] control stream failed: TypeError: AbortSignal.any is not a function
+[connection] connection lost, retry #1
+```
+
+所以 **94 只是「能解析」的门槛，不是「能跑」的门槛**。`Promise.withResolvers` 要 119、`AbortSignal.any` 要 116，两个都在 113 之上，而第二个正好落在会话控制流的第一次读取上——于是界面出得来、连接永远建不起来。
+
+补上这两个之后，shim 的完整清单是（每一项都是**扫 bundle 扫出来的**，不是猜的）：
+
+| API | 需要 Chromium |
+|---|---|
+| `String.prototype.replaceAll` | 85 |
+| `Array.prototype.at` / `String.prototype.at` | 92 |
+| `crypto.randomUUID` | 92，**且要求安全上下文** |
+| `Object.hasOwn` | 93 |
+| `Array.prototype.findLast` / `findLastIndex` | 97 |
+| `AbortSignal.timeout` | 103 |
+| `Array.prototype.toReversed` / `toSorted` / `with` | 110 |
+| `String.prototype.toWellFormed` | 111 |
+| `ArrayBuffer.prototype.transfer` | 114 |
+| `AbortSignal.any` | 116 |
+| `Object.groupBy` / `Map.groupBy` | 117 |
+| `Promise.withResolvers` | 119 |
+| `URL.canParse` | 120 |
+| `Set.prototype.union` / `intersection` / `difference` | 122 |
+| `URL.parse` | 126 |
+| `Promise.try` | 128 |
+| `Symbol.dispose` | 134 |
+| `navigator.clipboard` | **要求安全上下文** |
 
 ### 自动改用手机上更新的内核
 
@@ -267,9 +307,11 @@ App 会尝试**复用手机上已经安装的更新内核**，而不是要求用
 
 没找到可用内核时不会白屏，而是给出说明页。Android 侧的 `MIN_CHROMIUM` 与 Dart 侧的 `CompatScript.minimumChromium` 有一个测试守着，防止两边漂移。
 
-还有一个方向相反的坑：`crypto.randomUUID` 要求**安全上下文**，而本 App 是刻意用明文 HTTP 连局域网地址的——所以它在**最新**的 WebView 上同样不存在。`crypto.getRandomValues` 没有这个限制，于是也被一并补上。
+还有两个方向相反的坑：`crypto.randomUUID` 和 `navigator.clipboard` 都要求**安全上下文**，而本 App 是刻意用明文 HTTP 连局域网地址的——所以它们在**最新**的 WebView 上同样不存在。`crypto.getRandomValues` 和 `document.execCommand('copy')` 没有这个限制，于是也被一并补上。
 
-每个 shim 都先检测原生实现，新设备上完全不生效；并且与原生实现做过逐项差分对比。
+每个 shim 都先检测原生实现，新设备上完全不生效。行为本身由 `tools/compat_check.mjs` 把关：它把原生实现**删掉**、换成我们的、逐项对比结果（`node tools/compat_check.mjs`，需要 Node 24+，CI 里会跑）。
+
+有一件事**故意不做**：`structuredClone` 只在日志里报出来，不补。克隆写错会**静默**改坏状态，而方法缺失会在出错的地方当场抛异常——后者在手机上才查得动。
 
 ### 内置内核的版本（legacy）
 

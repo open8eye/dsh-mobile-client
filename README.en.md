@@ -240,8 +240,6 @@ engine's reach:
 |---|---|
 | private methods `#name() {}` | 84 |
 | `??=` / `\|\|=` / `&&=` | 85 |
-| `Array.prototype.at` (runtime API) | 92 |
-| `Object.hasOwn` (runtime API) | 93 |
 | `static {}` blocks | **94** |
 
 **Syntax is what actually blocks it, not APIs.** A parse error means **not one line of the file
@@ -260,16 +258,61 @@ parsed.
 
 The app therefore does two things:
 
-1. **Compatibility shims** injected ahead of the page's own scripts, filling in `Object.hasOwn`,
-   `Array.prototype.at`, `String.prototype.at`, `String.prototype.replaceAll` and
-   `crypto.randomUUID`. They genuinely help on Chromium 85–93 (syntax fine, APIs missing) and do
-   nothing at all on a newer engine.
+1. **Compatibility shims** injected ahead of the page's own scripts, filling in the runtime APIs
+   the bundle actually uses (the list is the next section). They genuinely help on an old engine
+   (syntax fine, APIs missing) and do nothing at all on a new one.
 2. **A version gate**: below Chromium 94 the app shows an explanation instead of a white page. The
    floor is 94 (`static {}`) rather than 85 (`??=`) on purpose — patching the operators would only
    move the parse error a few kilobytes down the same file.
 
 Below 94 the **only** fix is a newer kernel. Rewriting the bundle that far down is not a shim but a
 transpiler — `static {}` cannot be rewritten textually without understanding the class it sits in.
+
+### Parsing is not the same as working
+
+A second field report came from the same user on the same phone, this time running the **bundled
+kernel**:
+
+```
+webViewKernel: upgraded kernel: bundled webview/armeabi-v7a.apk (now 113.0.5672.136)
+loaded http://100.111.56.77:3081/
+```
+
+Chromium 113 parsed the bundle and mounted the app, and it still could not connect:
+
+```
+Uncaught TypeError: Promise.withResolvers is not a function @ http://100.111.56.77:3081/:47:65
+[session-controller] control stream failed: TypeError: AbortSignal.any is not a function
+[connection] connection lost, retry #1
+```
+
+So **94 is the "can parse" floor, not the "can run" floor**. `Promise.withResolvers` needs 119 and
+`AbortSignal.any` needs 116, both above 113 — and the second one lands on the very first read of
+the session controller's control stream, so the UI appears and the connection never comes up.
+
+With those two added, the full shim list is (every entry was **found by scanning the shipped
+bundles**, not guessed):
+
+| API | needs Chromium |
+|---|---|
+| `String.prototype.replaceAll` | 85 |
+| `Array.prototype.at` / `String.prototype.at` | 92 |
+| `crypto.randomUUID` | 92, **and a secure context** |
+| `Object.hasOwn` | 93 |
+| `Array.prototype.findLast` / `findLastIndex` | 97 |
+| `AbortSignal.timeout` | 103 |
+| `Array.prototype.toReversed` / `toSorted` / `with` | 110 |
+| `String.prototype.toWellFormed` | 111 |
+| `ArrayBuffer.prototype.transfer` | 114 |
+| `AbortSignal.any` | 116 |
+| `Object.groupBy` / `Map.groupBy` | 117 |
+| `Promise.withResolvers` | 119 |
+| `URL.canParse` | 120 |
+| `Set.prototype.union` / `intersection` / `difference` | 122 |
+| `URL.parse` | 126 |
+| `Promise.try` | 128 |
+| `Symbol.dispose` | 134 |
+| `navigator.clipboard` | **a secure context** |
 
 ### Reusing a newer kernel already on the phone
 
@@ -296,12 +339,18 @@ When no usable kernel is found the app shows an explanation instead of a white p
 the Android-side `MIN_CHROMIUM` against drifting from the Dart-side
 `CompatScript.minimumChromium`.
 
-There is a trap pointing the other way too: `crypto.randomUUID` requires a **secure context**, and
-this app deliberately talks to a LAN address over plain HTTP — so it is missing even on the
-**newest** WebView. `crypto.getRandomValues` carries no such restriction, so it is shimmed as well.
+There are two traps pointing the other way: `crypto.randomUUID` and `navigator.clipboard` both
+require a **secure context**, and this app deliberately talks to a LAN address over plain HTTP — so
+they are missing even on the **newest** WebView. `crypto.getRandomValues` and
+`document.execCommand('copy')` carry no such restriction, so they are shimmed as well.
 
-Every shim checks for the native implementation first, so a current device is untouched, and each
-was differentially tested against the native behaviour.
+Every shim checks for the native implementation first, so a current device is untouched. Their
+behaviour is pinned down by `tools/compat_check.mjs`, which deletes the real implementation, puts
+ours in its place and compares the results (`node tools/compat_check.mjs`, Node 24+, run in CI).
+
+One thing is **deliberately not** shimmed: `structuredClone` is only reported in the log. A clone
+that is subtly wrong corrupts state silently, while a missing method throws where the bug is — and
+only the second one is debuggable from a phone.
 
 ## Building
 

@@ -35,6 +35,12 @@
   避免这次会话的第一个 WebView 仍按旧内核创建
 - 该版本只打包 armeabi-v7a，保证以 32 位进程运行，与 32 位内核匹配
 - 应用内更新按文件名区分两个版本，各取所需，绝不交叉
+- 补上内置内核缺的运行时 API。Chromium 113 解析得了 bundle，却缺
+  `Promise.withResolvers`（要 119）和 `AbortSignal.any`（要 116）——后者正好落在会话控制流的
+  第一次读取上，症状是**界面出得来、连接永远建不起来**并不断重试
+- 兼容 shim 清单扩大到 20 组，每一项都是扫描 DSH 的 bundle 得出的，不再靠猜
+- 新增 `tools/compat_check.mjs`：把原生实现删掉、换成 shim、逐项对比结果，CI 里跑
+  （需要 Node 24+）。`Object.hasOwn` 等早先就有的 shim 也一并纳入对比
 
 ## [1.0.0] - 首个版本
 

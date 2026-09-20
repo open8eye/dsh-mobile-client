@@ -24,6 +24,15 @@ jobs:
           channel: stable
           cache: true
 
+      - uses: actions/setup-node@v4
+        with:
+          # The shim check is differential: it deletes the real implementation
+          # and compares against ours, so it needs a Node that has them all.
+          node-version: '24'
+
+      - name: Check the browser shims against the real APIs
+        run: node tools/compat_check.mjs
+
       - name: Install dependencies
         working-directory: app
         run: flutter pub get

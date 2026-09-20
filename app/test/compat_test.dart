@@ -54,6 +54,75 @@ void main() {
     });
   });
 
+  group('CompatScript.source', () {
+    // The doc comment above the class is the contract; the script is the
+    // implementation. Nothing in the build notices when one moves without the
+    // other, and a shim that documents an API it no longer installs is worse
+    // than no documentation at all.
+    const labels = <String>[
+      'Object.hasOwn',
+      'Array.prototype.at',
+      'String.prototype.at',
+      'String.prototype.replaceAll',
+      'Promise.withResolvers',
+      'Promise.try',
+      'AbortSignal.any',
+      'AbortSignal.timeout',
+      'Array.prototype.findLast',
+      'Array.prototype.findLastIndex',
+      'Array.prototype.toReversed',
+      'Array.prototype.toSorted',
+      'Array.prototype.with',
+      'String.prototype.toWellFormed',
+      'Object.groupBy',
+      'Map.groupBy',
+      'Set.prototype.union',
+      'URL.parse',
+      'ArrayBuffer.prototype.transferToFixedLength',
+      'Symbol.dispose',
+      'crypto.randomUUID',
+      'navigator.clipboard.writeText',
+    ];
+
+    test('every shim reports itself under the name the docs use', () {
+      for (final label in labels) {
+        expect(
+          CompatScript.source,
+          contains("'$label'"),
+          reason: '$label is documented but never installed or reported',
+        );
+      }
+    });
+
+    test('the findings are parked where DiagnosticsScript looks', () {
+      // The shim runs at document-start, before the Flutter bridge exists, so
+      // a direct bridge call would be dropped on the floor. DiagnosticsScript
+      // drains this global once the bridge is up.
+      expect(CompatScript.source, contains('window.__dshCompatReport'));
+      expect(CompatScript.source, isNot(contains('dshDiag.log')));
+      final diagnostics =
+          File('lib/core/diagnostics/diagnostics_script.dart').readAsStringSync();
+      expect(
+        diagnostics,
+        contains('__dshCompatReport'),
+        reason: 'the two scripts stopped agreeing on the channel',
+      );
+    });
+
+    test('every version shim goes through ensure()', () {
+      // ensure() is the only place that checks for the native implementation,
+      // so a shim that skips it can overwrite a perfectly good engine.
+      expect("ensure('".allMatches(CompatScript.source).length, 20);
+    });
+
+    test('structuredClone is reported rather than faked', () {
+      // A clone that is subtly wrong corrupts state silently; a missing method
+      // throws where the bug is. Only one of those is debuggable from a phone.
+      expect(CompatScript.source, contains('structuredClone'));
+      expect(CompatScript.source, isNot(contains("'structuredClone'")));
+    });
+  });
+
   group('threshold parity with Android', () {
     test('the Kotlin kernel threshold matches the Dart one', () {
       // Dart decides whether to explain; Kotlin decides whether to swap in
