@@ -62,12 +62,21 @@ jobs:
       # `standard` is the small app that reuses a newer WebView kernel already
       # installed on the phone. `legacy` carries its own Chromium and is built
       # 32-bit to match it, so it works on a device with nothing newer.
+      # The Gitee half is only overridden when GITEE_REPO actually says
+      # something. Falling back to github.repository looked harmless and was
+      # not: the two owners are different, so an unconfigured run baked a dead
+      # Gitee channel into the APK and reported the host as unreachable
+      # forever after. Leaving the define out lets the app's own default —
+      # which knows the real address — apply instead.
       - name: Build the standard APK
         working-directory: app
         run: |
-          flutter build apk --release --flavor standard \
-            --dart-define=DSH_GITHUB_REPO=${{ github.repository }} \
-            --dart-define=DSH_GITEE_REPO=${{ vars.GITEE_REPO || github.repository }}
+          set -euo pipefail
+          defines=("--dart-define=DSH_GITHUB_REPO=${{ github.repository }}")
+          if [ -n "${{ vars.GITEE_REPO }}" ]; then
+            defines+=("--dart-define=DSH_GITEE_REPO=${{ vars.GITEE_REPO }}")
+          fi
+          flutter build apk --release --flavor standard "${defines[@]}"
 
       # ~85 MB, so it is fetched here rather than committed. The legacy build
       # needs the asset to exist; without it the flavour would produce an APK
@@ -78,9 +87,13 @@ jobs:
       - name: Build the legacy APK
         working-directory: app
         run: |
+          set -euo pipefail
+          defines=("--dart-define=DSH_GITHUB_REPO=${{ github.repository }}")
+          if [ -n "${{ vars.GITEE_REPO }}" ]; then
+            defines+=("--dart-define=DSH_GITEE_REPO=${{ vars.GITEE_REPO }}")
+          fi
           flutter build apk --release --flavor legacy --target-platform android-arm \
-            --dart-define=DSH_GITHUB_REPO=${{ github.repository }} \
-            --dart-define=DSH_GITEE_REPO=${{ vars.GITEE_REPO || github.repository }}
+            "${defines[@]}"
 
       - name: Collect the artefacts
         run: |

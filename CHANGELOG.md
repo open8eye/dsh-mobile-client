@@ -4,6 +4,20 @@
 
 版本号规则与发布流程见 [docs/RELEASING.md](docs/RELEASING.md)。
 
+## [1.1.3] - 2026-09-21
+
+### 修复
+
+- **两条发布渠道以前指向同一个 owner，而它们其实是两家**：GitHub 上是
+  `open8eye/dsh-mobile-client`，Gitee 上是 `lulendi/dsh-mobile-client`。打包时两边
+  都用了后者，于是 GitHub 那条路永远 404。这件事是**安静**的——检查更新只把那一侧
+  记成「连不上」，然后靠另一侧工作，看起来一切正常，直到能用的那一侧出问题为止
+- 发布流程在 `GITEE_REPO` 没配置时会拿 `github.repository` 顶上，于是打出一个 Gitee
+  通道指向错误地址的包。现在没配置就不传这个 define，让 App 自己的默认值生效
+- CI 上传产物时路径写错了（写 `app-release.apk`，实际是 `app-standard-release.apk`），
+  配合 `if-no-files-found: error`，每次 master 推送的 CI 都在最后一步红掉，而
+  analyze / test / build 全是绿的——读起来像基础设施抽风，不像路径写错
+
 ## [1.1.2] - 2026-09-21
 
 ### 修复
