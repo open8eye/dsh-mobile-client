@@ -24,6 +24,25 @@ class AppPlatform {
     }
   }
 
+  /// Open the system's app-info page for [packageName], or for this app when
+  /// it is null.
+  ///
+  /// Used to point at the system WebView: on an old device that is the
+  /// component the user has to update, and its app-info page is where the
+  /// store link and the version number live.
+  static Future<bool> openAppInfo([String? packageName]) async {
+    try {
+      await _channel.invokeMethod<void>('openAppInfo', <String, Object?>{
+        'package': packageName,
+      });
+      return true;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
   /// Whether the OS will let this app hand an APK to the package installer.
   ///
   /// Always true below Android 8, where the concept does not exist.

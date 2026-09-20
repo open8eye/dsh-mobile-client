@@ -210,11 +210,32 @@ CI 会校验 tag 与 `pubspec.yaml` 是否一致、跑分析和测试、构建 A
 
 ### 白屏的根因与兼容层
 
-DSH 的前端由 Vite 构建。Vite 会把**语法**降级到目标浏览器，但**不会 polyfill 运行时 API**——而它的包里用了 `Object.hasOwn`（需要 Chromium 93）和 `Array.prototype.at`（需要 Chromium 92）。
+DSH 的前端由 Vite 构建。Vite 只把**语法**降级到它配置的目标，**不 polyfill 运行时 API**——于是包里同时存在两类超出旧引擎能力的东西：
 
-关键在于 `Object.hasOwn` 的每一处调用都在**引导整个应用的依赖注入容器**里。在 Chromium < 93 的 WebView 上它是 `undefined`，容器在装配自己时就抛 `TypeError`，React 永远挂不上，页面一片白——**没有错误码，没有异常，什么都没有**。这类 WebView 在旧机型上很常见（Android 10 / MIUI 12 等）。
+| 构造 | 需要 Chromium |
+|---|---|
+| 私有方法 `#name() {}` | 84 |
+| `??=` / `\|\|=` / `&&=` | 85 |
+| `Array.prototype.at`（运行时 API） | 92 |
+| `Object.hasOwn`（运行时 API） | 93 |
+| `static {}` 初始化块 | **94** |
 
-App 因此在页面脚本之前注入一层兼容 shim，补齐这几个 API，并记录**哪些是被补上的**。报告里出现 `compat: SHIMMED Object.hasOwn, ...`，就说明该升级系统 WebView 了。
+**真正卡住的是语法，不是 API。** 语法错误意味着整个文件**一行都不会执行**——shim 再全也救不了。
+
+现场的诊断报告把这一点钉死了：红米 K20 Pro 的系统 WebView 是 **Chromium 83**，日志里是
+
+```
+uncaught: Uncaught SyntaxError: Unexpected token '=' @ .../assets/index-DS_0SByp.js:2:8267
+```
+
+而那一位正好是 `p ??= H0(...)`。同一份报告里，shim 明明生效了（`compat: SHIMMED Object.hasOwn, ...`），页面却依然白屏——因为脚本根本没被解析。
+
+App 因此做了两件事：
+
+1. **兼容 shim**：在页面脚本之前补齐 `Object.hasOwn`、`Array.prototype.at`、`String.prototype.at`、`String.prototype.replaceAll` 与 `crypto.randomUUID`。它们在 Chromium 85–93 的设备上是真的有用（那类设备语法没问题、只缺 API），在更新的设备上完全不生效。
+2. **版本闸门**：WebView 低于 Chromium 94 时直接给出说明页，而不是白屏。门槛取 94（`static {}`）而非 85（`??=`）是刻意的——只修运算符只会把解析错误往后推几 KB。
+
+低于 94 时**唯一的解法是升级系统 WebView**。把 bundle 改写到那个程度不是 shim，是转译器——`static {}` 没法在不理解所在类的情况下做文本改写。
 
 还有一个方向相反的坑：`crypto.randomUUID` 要求**安全上下文**，而本 App 是刻意用明文 HTTP 连局域网地址的——所以它在**最新**的 WebView 上同样不存在。`crypto.getRandomValues` 没有这个限制，于是也被一并补上。
 

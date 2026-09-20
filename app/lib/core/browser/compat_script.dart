@@ -31,6 +31,50 @@ abstract final class CompatScript {
   /// Handler the shim reports its findings on.
   static const String handlerName = 'dshDiag';
 
+  /// The oldest Chromium that can even *parse* the DSH bundle.
+  ///
+  /// This is a syntax floor, not an API floor, and the distinction is the whole
+  /// point. Vite transpiles for its configured target and stops there, so the
+  /// bundle ships syntax that an older engine cannot parse at all — and a parse
+  /// error means **not one line of the file runs**, which is why shims cannot
+  /// rescue it however complete they are.
+  ///
+  /// Measured against the shipped bundle, the binding constraint is the static
+  /// initialisation block:
+  ///
+  /// | construct | needs |
+  /// |---|---|
+  /// | private methods `#name() {}` | Chromium 84 |
+  /// | `??=`, `||=`, `&&=` | Chromium 85 |
+  /// | `static {}` blocks | Chromium 94 |
+  ///
+  /// A device running Chromium 83 fails on `??=` first, which is exactly the
+  /// `Uncaught SyntaxError: Unexpected token '='` seen in the field. Raising
+  /// this to the `static {}` floor is deliberate: patching the operators would
+  /// only move the failure a few kilobytes down the same file.
+  ///
+  /// Rewriting the bundle to run below this is not a shim, it is a transpiler —
+  /// `static {}` cannot be rewritten textually without understanding the class
+  /// it sits in. Below this, the only real fix is updating the system WebView.
+  static const int minimumChromium = 94;
+
+  /// Chromium version behind a WebView build string, e.g. `83.0.4103.101`.
+  ///
+  /// Returns null when the string is absent or not a version, so an unknown
+  /// WebView is never mistaken for an old one.
+  static int? chromiumMajor(String? version) {
+    if (version == null) return null;
+    final match = RegExp(r'^\s*(\d+)').firstMatch(version);
+    if (match == null) return null;
+    return int.tryParse(match.group(1)!);
+  }
+
+  /// Whether [version] is too old to run the bundle at all.
+  static bool isTooOld(String? version) {
+    final major = chromiumMajor(version);
+    return major != null && major < minimumChromium;
+  }
+
   static const String source = r'''
 (function () {
   if (window.__dshCompatInstalled) { return; }

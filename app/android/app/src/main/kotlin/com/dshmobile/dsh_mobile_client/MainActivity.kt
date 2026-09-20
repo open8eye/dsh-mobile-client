@@ -45,6 +45,13 @@ class MainActivity : FlutterActivity() {
 
                     "deviceInfo" -> result.success(deviceInfo())
 
+                    "openAppInfo" -> {
+                        val target = call.argument<String>("package") ?: packageName
+                        result.success(
+                            openSystemScreen(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, target),
+                        )
+                    }
+
                     "shareText" -> {
                         val text = call.argument<String>("text")
                         if (text == null) {
@@ -198,9 +205,14 @@ class MainActivity : FlutterActivity() {
         (get.invoke(null, key) as? String)?.takeIf { it.isNotBlank() }
     }.getOrNull()
 
-    /** Open one of this app's pages in system settings. */
-    private fun openSystemScreen(action: String): Boolean {
-        val intent = Intent(action, Uri.parse("package:$packageName"))
+    /**
+     * Open a package's page in system settings.
+     *
+     * Defaults to this app; [target] lets it point at the system WebView, which
+     * is the component an old device actually needs to update.
+     */
+    private fun openSystemScreen(action: String, target: String = packageName): Boolean {
+        val intent = Intent(action, Uri.parse("package:$target"))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return runCatching { startActivity(intent) }.isSuccess
     }

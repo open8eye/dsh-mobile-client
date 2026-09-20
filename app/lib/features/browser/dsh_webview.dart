@@ -80,6 +80,14 @@ class DshWebViewState extends State<DshWebView> {
   /// progress bar spins forever and the user has nothing to report.
   Timer? _loadTimeout;
 
+  /// Runs once. The user is allowed to retry past a failed engine check, so
+  /// this never blocks a deliberate second attempt.
+  bool _engineChecked = false;
+
+  /// Package name of the system WebView, so the failure screen can offer to
+  /// open its settings page.
+  String? _webViewPackage;
+
   /// A white screen is a page that loaded and painted nothing. It has no error
   /// code and no exception, so it is detected by asking the page itself.
   static const Duration _loadTimeoutAfter = Duration(seconds: 25);
@@ -149,6 +157,11 @@ class DshWebViewState extends State<DshWebView> {
   Future<void> _load(String url) async {
     final controller = _controller;
     if (controller == null) return;
+    if (!_engineChecked) {
+      _engineChecked = true;
+      if (await _engineTooOld()) return;
+      if (!mounted) return;
+    }
     // Redacted at the source: the entry URL carries the access PIN.
     Diagnostics.instance.info('WebView', 'load ${Redact.url(url)}');
     setState(() {
@@ -159,6 +172,31 @@ class DshWebViewState extends State<DshWebView> {
     });
     _armTimeout();
     await controller.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+  }
+
+  /// Refuse to pretend an unparseable bundle might work.
+  ///
+  /// A WebView older than [CompatScript.minimumChromium] cannot even *parse*
+  /// the DSH bundle, so the failure is certain and no shim can help. Loading
+  /// anyway would produce the white screen this whole screen exists to
+  /// replace. Returns true when the caller should stop.
+  Future<bool> _engineTooOld() async {
+    final info = await DiagnosticsReport.deviceInfo();
+    final version = info['webViewVersion'];
+    _webViewPackage = info['webViewPackage'];
+    if (!CompatScript.isTooOld(version)) return false;
+
+    final major = CompatScript.chromiumMajor(version);
+    final detail = '${info['webViewPackage'] ?? 'WebView'} $version '
+        '(Chromium $major < ${CompatScript.minimumChromium})';
+    Diagnostics.instance.error('WebView', 'engine too old to parse the bundle: $detail');
+    if (!mounted) return true;
+    setState(() {
+      _loading = false;
+      _failure = _Failure.webViewTooOld;
+      _detail = detail;
+    });
+    return true;
   }
 
   void _armTimeout() {
@@ -507,6 +545,7 @@ class DshWebViewState extends State<DshWebView> {
                 probe: _probe,
                 onRetry: () => _load(_entryUrl),
                 onHardReload: hardReload,
+                webViewPackage: _webViewPackage,
               ),
             ),
           ),
@@ -516,7 +555,7 @@ class DshWebViewState extends State<DshWebView> {
 }
 
 /// Why a page is not usable.
-enum _Failure { timeout, network, http, blank }
+enum _Failure { timeout, network, http, blank, webViewTooOld }
 
 /// The screen shown instead of a blank page.
 ///
@@ -533,6 +572,7 @@ class _FailureView extends StatelessWidget {
     required this.probe,
     required this.onRetry,
     required this.onHardReload,
+    this.webViewPackage,
   });
 
   final _Failure failure;
@@ -543,11 +583,15 @@ class _FailureView extends StatelessWidget {
   final VoidCallback onRetry;
   final VoidCallback onHardReload;
 
+  /// Only set for [_Failure.webViewTooOld], to offer a shortcut to its settings.
+  final String? webViewPackage;
+
   IconData get _icon => switch (failure) {
         _Failure.timeout => Icons.hourglass_empty,
         _Failure.network => Icons.cloud_off_outlined,
         _Failure.http => Icons.error_outline,
         _Failure.blank => Icons.visibility_off_outlined,
+        _Failure.webViewTooOld => Icons.system_update_alt,
       };
 
   String _title(BuildContext context) => switch (failure) {
@@ -555,6 +599,7 @@ class _FailureView extends StatelessWidget {
         _Failure.network => context.tr('webFailNetwork'),
         _Failure.http => context.tr('webFailHttp'),
         _Failure.blank => context.tr('webFailBlank'),
+        _Failure.webViewTooOld => context.tr('webViewTooOld'),
       };
 
   /// Concrete things to try, not "something went wrong".
@@ -572,6 +617,12 @@ class _FailureView extends StatelessWidget {
             context.tr('webFailBlankHint1'),
             context.tr('webFailBlankHint2'),
             context.tr('webFailBlankHint3'),
+          ],
+        _Failure.webViewTooOld => <String>[
+            context.tr('webViewTooOldHint1'),
+            context.tr('webViewTooOldHint2'),
+            context.tr('webViewTooOldHint3'),
+            context.tr('webViewTooOldHint4'),
           ],
       };
 
@@ -658,6 +709,14 @@ class _FailureView extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: 18),
+            if (failure == _Failure.webViewTooOld && webViewPackage != null) ...<Widget>[
+              FilledButton.icon(
+                onPressed: () => AppPlatform.openAppInfo(webViewPackage),
+                icon: const Icon(Icons.settings_outlined),
+                label: Text(context.tr('webViewOpenSettings')),
+              ),
+              const SizedBox(height: 8),
+            ],
             FilledButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),

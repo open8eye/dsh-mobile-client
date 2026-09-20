@@ -161,6 +161,13 @@ class L10n {
       'webFailBlankHint3': '点下面的「复制诊断信息」发出来，就足够定位了。',
       'webFailHardReload': '清空缓存并重试',
 
+      'webViewTooOld': '系统 WebView 版本过低',
+      'webViewTooOldHint1': '这台手机的系统 WebView 太旧，连网页脚本都解析不了（DSH 需要 Chromium 94 以上）。',
+      'webViewTooOldHint2': '这不是 App 的问题——升级系统 WebView 就能解决。',
+      'webViewTooOldHint3': '到应用商店搜索「Android System WebView」并更新它，小米应用商店和 Google Play 都可以。',
+      'webViewTooOldHint4': '更新后回到这里重试即可。如果确定你的 DSH 版本较旧，也可以直接点「重试」强行加载。',
+      'webViewOpenSettings': '打开 WebView 设置',
+
       'diagnosticsTitle': '诊断与反馈',
       'diagnosticsIntro': '下面就是可以发出去的内容。访问密码和会话 Cookie 已自动隐藏，你可以先读一遍再决定要不要发送。',
       'diagnosticsCopy': '复制',
@@ -327,6 +334,13 @@ class L10n {
       'webFailBlankHint2': 'It can also mean the DSH build on the computer is too old; update DeepSeek Harness there.',
       'webFailBlankHint3': 'Tap "Copy diagnostics" below and send it along — that is enough to pin it down.',
       'webFailHardReload': 'Clear cache and retry',
+
+      'webViewTooOld': 'The system WebView is too old',
+      'webViewTooOldHint1': 'This phone\'s system WebView cannot even parse the page\'s scripts; DSH needs Chromium 94 or newer.',
+      'webViewTooOldHint2': 'This is not an app bug — updating the system WebView fixes it.',
+      'webViewTooOldHint3': 'Search for "Android System WebView" in your app store and update it; Mi Store and Google Play both carry it.',
+      'webViewTooOldHint4': 'Come back and retry afterwards. If you know your DSH build is older, tapping Retry will load it anyway.',
+      'webViewOpenSettings': 'Open WebView settings',
 
       'diagnosticsTitle': 'Diagnostics',
       'diagnosticsIntro': 'This is exactly what would be sent. The access password and session cookie are removed automatically — read it before you decide to share.',

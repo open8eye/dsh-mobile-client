@@ -224,19 +224,45 @@ run's logs, and any JavaScript exception or `console.error` captured from the pa
 
 ### Why the page goes blank, and the compatibility layer
 
-The DSH frontend is built by Vite. Vite transpiles **syntax** down to its target, but it does not
-polyfill **runtime APIs** — and the bundle uses `Object.hasOwn` (needs Chromium 93) and
-`Array.prototype.at` (needs Chromium 92).
+The DSH frontend is built by Vite. Vite transpiles **syntax** down to its configured target and
+does not polyfill **runtime APIs**, so the bundle carries both kinds of thing beyond an older
+engine's reach:
 
-The decisive part is that every `Object.hasOwn` call site sits inside the **dependency-injection
-container that bootstraps the whole app**. On a WebView older than Chromium 93 it is `undefined`,
-the container throws while wiring itself up, React never mounts, and the page stays white — **no
-error code, no exception, nothing**. Such WebViews are common on older devices (Android 10 /
-MIUI 12 and similar).
+| construct | needs Chromium |
+|---|---|
+| private methods `#name() {}` | 84 |
+| `??=` / `\|\|=` / `&&=` | 85 |
+| `Array.prototype.at` (runtime API) | 92 |
+| `Object.hasOwn` (runtime API) | 93 |
+| `static {}` blocks | **94** |
 
-The app therefore injects a compatibility layer ahead of the page's own scripts, filling those
-APIs in and reporting **which ones it had to fill**. A `compat: SHIMMED Object.hasOwn, ...` line in
-the report means the system WebView should be updated.
+**Syntax is what actually blocks it, not APIs.** A parse error means **not one line of the file
+runs**, so no shim can rescue it.
+
+A diagnostic report from the field settled it: the Redmi K20 Pro's system WebView is **Chromium
+83**, and the log read
+
+```
+uncaught: Uncaught SyntaxError: Unexpected token '=' @ .../assets/index-DS_0SByp.js:2:8267
+```
+
+That offset is exactly `p ??= H0(...)`. In the same report the shims had plainly worked
+(`compat: SHIMMED Object.hasOwn, ...`) and the page was still white — because the script was never
+parsed.
+
+The app therefore does two things:
+
+1. **Compatibility shims** injected ahead of the page's own scripts, filling in `Object.hasOwn`,
+   `Array.prototype.at`, `String.prototype.at`, `String.prototype.replaceAll` and
+   `crypto.randomUUID`. They genuinely help on Chromium 85–93 (syntax fine, APIs missing) and do
+   nothing at all on a newer engine.
+2. **A version gate**: below Chromium 94 the app shows an explanation instead of a white page. The
+   floor is 94 (`static {}`) rather than 85 (`??=`) on purpose — patching the operators would only
+   move the parse error a few kilobytes down the same file.
+
+Below 94 the **only** fix is updating the system WebView. Rewriting the bundle that far down is not
+a shim but a transpiler — `static {}` cannot be rewritten textually without understanding the
+class it sits in.
 
 There is a trap pointing the other way too: `crypto.randomUUID` requires a **secure context**, and
 this app deliberately talks to a LAN address over plain HTTP — so it is missing even on the
