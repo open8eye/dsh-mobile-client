@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -265,6 +266,49 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  /// Bring the device that is actually on screen back into view.
+  ///
+  /// The name in the bar is always the current device, so tapping it while
+  /// another page is showing means "take me back to it" — by far the common
+  /// case. Editing moved to a long press, because a stray tap while reading
+  /// the page should not drop the user into a settings form.
+  void _showCurrentSession() {
+    setState(() => _page = _sessions.currentId == null ? _pageDevices : _pageSession);
+  }
+
+  /// When the last back press happened, for the two-press exit below.
+  DateTime? _backPressedAt;
+
+  /// How long a second back press has to follow the first to count as one.
+  static const Duration _exitWindow = Duration(seconds: 2);
+
+  /// What back means, now that it cannot leave by accident.
+  ///
+  /// * On another page it returns to the session, which is the obvious
+  ///   reading of "go back" in a shell whose pages sit under a bottom bar.
+  /// * On the session page the first press only says so, and a second press
+  ///   within [_exitWindow] leaves the app. An accidental edge swipe can no
+  ///   longer close anything, but back still has a way out.
+  ///
+  /// The WebView's own history is deliberately not involved. DSH is a single
+  /// page app whose navigation lives in its own UI, so rewinding its history
+  /// lands on states the user never asked for.
+  void _handleBack() {
+    if (_page != _pageSession || _sessions.currentId == null) {
+      _showCurrentSession();
+      return;
+    }
+
+    final now = DateTime.now();
+    final last = _backPressedAt;
+    if (last != null && now.difference(last) < _exitWindow) {
+      SystemNavigator.pop();
+      return;
+    }
+    _backPressedAt = now;
+    _snack(context.tr('pressBackAgainToExit'));
+  }
+
   Future<void> _openCurrentConfig() async {
     final id = _sessions.currentId;
     final device = id == null ? null : context.read<DeviceController>().byId(id);
@@ -394,43 +438,54 @@ class _HomeShellState extends State<HomeShell> {
           current != null,
     );
 
-    return Scaffold(
-      body: IndexedStack(
-        index: _page,
-        sizing: StackFit.expand,
-        children: <Widget>[
-          // The camera is only alive while its page is selected.
-          _page == _pageScan
-              ? ScanScreen(
-                  onScanned: _onScanned,
-                  onManualEntry: () => _openEditor(),
-                )
-              : const SizedBox.shrink(),
-          // No AppBar above the WebView, so the status bar has to be kept out
-          // of it here instead.
-          SafeArea(
-            bottom: false,
-            child: _buildSessions(devices, settings),
-          ),
-          DeviceListScreen(
-            onSelect: _openSession,
-            onAdd: () => _openEditor(),
-            onEdit: (device) => _openEditor(device: device),
-            onDelete: _deleteDevice,
-          ),
-          const SettingsScreen(),
-        ],
-      ),
-      bottomNavigationBar: _BottomBar(
-        page: _page,
-        sessionCount: _sessions.length,
-        currentName: current?.name,
-        onScan: () => setState(() => _page = _pageScan),
-        onSessions: _showSessions,
-        onCurrentDevice: _openCurrentConfig,
-        onDevices: () => setState(() => _page = _pageDevices),
-        onSettings: () => setState(() => _page = _pageSettings),
-        onRefresh: current == null ? null : _reloadCurrent,
+    // Back never leaves the page by accident. Android's edge swipe is easy to
+    // trigger while scrolling a full-screen WebView, and without this it popped
+    // the shell — the whole app, mid-task. Claiming the gesture here is the
+    // only place it can be claimed: the shell is the root route.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _handleBack();
+      },
+      child: Scaffold(
+        body: IndexedStack(
+          index: _page,
+          sizing: StackFit.expand,
+          children: <Widget>[
+            // The camera is only alive while its page is selected.
+            _page == _pageScan
+                ? ScanScreen(
+                    onScanned: _onScanned,
+                    onManualEntry: () => _openEditor(),
+                  )
+                : const SizedBox.shrink(),
+            // No AppBar above the WebView, so the status bar has to be kept out
+            // of it here instead.
+            SafeArea(
+              bottom: false,
+              child: _buildSessions(devices, settings),
+            ),
+            DeviceListScreen(
+              onSelect: _openSession,
+              onAdd: () => _openEditor(),
+              onEdit: (device) => _openEditor(device: device),
+              onDelete: _deleteDevice,
+            ),
+            const SettingsScreen(),
+          ],
+        ),
+        bottomNavigationBar: _BottomBar(
+          page: _page,
+          sessionCount: _sessions.length,
+          currentName: current?.name,
+          onScan: () => setState(() => _page = _pageScan),
+          onSessions: _showSessions,
+          onCurrentDevice: _showCurrentSession,
+          onEditCurrentDevice: _openCurrentConfig,
+          onDevices: () => setState(() => _page = _pageDevices),
+          onSettings: () => setState(() => _page = _pageSettings),
+          onRefresh: current == null ? null : _reloadCurrent,
+        ),
       ),
     );
   }
@@ -541,6 +596,7 @@ class _BottomBar extends StatelessWidget {
     required this.onScan,
     required this.onSessions,
     required this.onCurrentDevice,
+    required this.onEditCurrentDevice,
     required this.onDevices,
     required this.onSettings,
     required this.onRefresh,
@@ -560,6 +616,7 @@ class _BottomBar extends StatelessWidget {
   final VoidCallback onScan;
   final VoidCallback onSessions;
   final VoidCallback onCurrentDevice;
+  final VoidCallback onEditCurrentDevice;
   final VoidCallback onDevices;
   final VoidCallback onSettings;
   final VoidCallback? onRefresh;
@@ -602,8 +659,9 @@ class _BottomBar extends StatelessWidget {
                       name: currentName,
                       tooltip: currentName == null
                           ? context.tr('openDeviceList')
-                          : context.tr('editDeviceTitle'),
+                          : context.tr('deviceSlotHint'),
                       onTap: onCurrentDevice,
+                      onLongPress: onEditCurrentDevice,
                     ),
                   ),
                   _BarAction(
@@ -705,11 +763,17 @@ class _BarAction extends StatelessWidget {
 /// The device name, in the middle of the bar. Tapping it opens that device's
 /// settings — which is where the kind chip went when the AppBar was removed.
 class _NameSlot extends StatelessWidget {
-  const _NameSlot({required this.name, required this.tooltip, required this.onTap});
+  const _NameSlot({
+    required this.name,
+    required this.tooltip,
+    required this.onTap,
+    required this.onLongPress,
+  });
 
   final String? name;
   final String tooltip;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -719,6 +783,7 @@ class _NameSlot extends StatelessWidget {
       message: tooltip,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Center(
           child: Text(
             label,

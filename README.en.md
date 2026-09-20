@@ -38,7 +38,8 @@ A browser still makes that awkward:
 - **Scan to connect** — scan the QR code on the computer's Settings → Phone access page.
   Manual address entry works too, and a share link carrying `?token=` needs no PIN at all.
 - **Device list** — multiple DSH servers; tap to switch, rename, edit or delete.
-- **Nicknames** — each device has a name, shown in the middle of the bottom bar.
+- **Nicknames** — each device has a name, shown in the middle of the bottom bar. Tap it to
+  return to that device, long-press to edit it.
 - **Two addresses per device** — store an alternate address (usually the Tailscale one)
   alongside the main one. Both are probed at connect time and the one that answers first is
   used: LAN at home, Tailscale elsewhere, with no manual switching.

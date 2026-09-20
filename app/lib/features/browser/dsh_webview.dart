@@ -8,6 +8,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/browser/compat_script.dart';
+import '../../core/browser/overscroll_script.dart';
 import '../../core/dsh/dsh_endpoint.dart';
 import '../../core/diagnostics/diagnostics.dart';
 import '../../core/diagnostics/diagnostics_report.dart';
@@ -468,6 +469,10 @@ class DshWebViewState extends State<DshWebView> {
             clearCache: false,
             cacheEnabled: true,
             userAgent: '',
+            // iOS/macOS only, and true by default: without it a horizontal
+            // drag rewinds the WebView's own history. Android has no such
+            // gesture, which is why the page-side guard below exists too.
+            allowsBackForwardNavigationGestures: false,
           ),
           initialUserScripts: UnmodifiableListView<UserScript>(<UserScript>[
             // Order matters. The shims go first: the DSH bundle needs them the
@@ -484,6 +489,12 @@ class DshWebViewState extends State<DshWebView> {
             ),
             UserScript(
               source: WebNotificationScript.source,
+              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            ),
+            // Independent of the three above: it only suppresses the
+            // engine's swipe-back, so it can go anywhere in the list.
+            UserScript(
+              source: OverscrollScript.source,
               injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             ),
           ]),
