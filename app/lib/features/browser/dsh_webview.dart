@@ -117,6 +117,10 @@ class DshWebViewState extends State<DshWebView> {
   bool _retriedWithStoredPassword = false;
   bool _promptVisible = false;
 
+  /// One automatic cookie drop per page session, for a session cookie minted by
+  /// a previous `dsh web` process. See [_recoverStaleSession].
+  bool _retriedStaleSession = false;
+
   /// The password the in-app prompt has already navigated with.
   ///
   /// Saving a password rebuilds this widget with a new [DshWebView.password],
@@ -180,6 +184,7 @@ class DshWebViewState extends State<DshWebView> {
     Diagnostics.instance.registerSecret(widget.password);
     if (oldWidget.device.id != widget.device.id) {
       _retriedWithStoredPassword = false;
+      _retriedStaleSession = false;
       _promptAppliedPassword = null;
       _failure = null;
       _load(_entryUrl);
@@ -187,6 +192,7 @@ class DshWebViewState extends State<DshWebView> {
       // Reconnecting picked a different address — the phone moved between the
       // LAN and the tailnet. Nothing about the old page is worth keeping.
       _retriedWithStoredPassword = false;
+      _retriedStaleSession = false;
       _promptAppliedPassword = null;
       _failure = null;
       _load(_entryUrl);
@@ -203,11 +209,13 @@ class DshWebViewState extends State<DshWebView> {
       // The password changed somewhere else (the device config screen, or it
       // was cleared): apply it now.
       _retriedWithStoredPassword = false;
+      _retriedStaleSession = false;
       _load(_entryUrl);
     } else if (!oldWidget.isActive && widget.isActive) {
       // This session sat behind another one and was not allowed to prompt;
       // now that it is on screen, give the stored password another go.
       _retriedWithStoredPassword = false;
+      _retriedStaleSession = false;
       _load(_entryUrl);
     }
   }
@@ -297,6 +305,7 @@ class DshWebViewState extends State<DshWebView> {
     final controller = _controller;
     if (controller == null) return;
     _retriedWithStoredPassword = false;
+    _retriedStaleSession = false;
     await _load(_entryUrl);
   }
 
@@ -317,6 +326,7 @@ class DshWebViewState extends State<DshWebView> {
       // Best effort; reloading is still the right next step either way.
     }
     _retriedWithStoredPassword = false;
+    _retriedStaleSession = false;
     await _load(_entryUrl);
   }
 
@@ -357,6 +367,17 @@ class DshWebViewState extends State<DshWebView> {
       _probe = probe;
       if (blank) _failure = _Failure.blank;
     });
+
+    // dsh web itself rejected the session. The phone authenticated — the entry
+    // URL carried the stored PIN and dsh-pocket accepted it — but the session
+    // cookie it is carrying was signed by a *previous* dsh web process, so the
+    // proxy's "cookie present, no launch token needed" shortcut leaves the
+    // handshake unable to ever run again. Asking the user for the PIN would be
+    // the wrong repair: the PIN is not what is broken.
+    if (!_retriedStaleSession && DiagnosticsScript.isDshWebAuthRejection(probe)) {
+      await _recoverStaleSession();
+      return;
+    }
 
     try {
       final result = await controller.evaluateJavascript(
@@ -450,6 +471,38 @@ class DshWebViewState extends State<DshWebView> {
     await onSaved?.call(entered);
     _retriedWithStoredPassword = true;
     await _load(_endpoint.authenticatedUrl(entered));
+  }
+
+  /// Drop a session cookie left behind by a previous `dsh web` process.
+  ///
+  /// The cookie is the only thing standing in the way, and it is derived state:
+  /// re-entering through `?token=<PIN>` mints a fresh one, which is exactly what
+  /// [DshEndpoint.authenticatedUrl] is for. Dropping it is what makes the proxy
+  /// inject the launch token again and redo the handshake.
+  ///
+  /// The cache is deliberately left alone — this failure is about the cookie,
+  /// and clearing the cache as well would only make the retry slower.
+  ///
+  /// Runs at most once per page session ([_retriedStaleSession]): a server that
+  /// answers this line *after* a cookie-less retry has a problem the user needs
+  /// to see, and looping would hide it behind a spinner.
+  Future<void> _recoverStaleSession() async {
+    _retriedStaleSession = true;
+    Diagnostics.instance.info(
+      'WebView',
+      'dsh web session rejected: the session cookie was minted by a previous '
+      'dsh web process; dropping cookies and retrying',
+    );
+    try {
+      await CookieManager.instance().deleteAllCookies();
+    } on Exception {
+      // Best effort; reloading is still the right next step either way.
+    }
+    if (!mounted) return;
+    // The PIN was never in question, so let the stored-password retry run again
+    // if this attempt does land on the proxy's login page after all.
+    _retriedWithStoredPassword = false;
+    await _load(_entryUrl);
   }
 
   /// Hand a non-DSH link to the operating system.

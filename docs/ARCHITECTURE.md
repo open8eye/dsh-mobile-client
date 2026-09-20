@@ -43,6 +43,15 @@ App (Flutter)
 第 3 步的「一次」是刻意的：密码错了就停下来问人，
 而不是无限重试把自己撞进 60 秒的限速里。
 
+还有一条**先于**第 3 步的分支：页面正文命中 `dsh web authentication required`
+（dsh web 自己的会话失效页——67 个字符、无脚本）时，说明手机**已经认证过了**，只是携带的
+会话 Cookie 是上一个 `dsh web` 进程签的（每次重启换密钥）。dsh-pocket 只在请求不带
+`dsh-auth-*` cookie 时才补 launch token，所以这个 Cookie 会让握手**永远不再发生**：
+刷新多少次都是这一句。App 此时清掉 Cookie 再进一次（`_recoverStaleSession`，
+每个页面会话只做一次）。
+
+这是唯一一种 App 能自己修好的 401：**密码没坏**，把用户拉去重输密码是错的修法。
+
 ### 多地址选择（`address_probe.dart`）
 
 一台 DSH 常有不止一个入口：家里的局域网地址、出门用的 Tailscale 地址。哪个能用

@@ -148,4 +148,27 @@ abstract final class DiagnosticsScript {
     if (text is! int || bodyChildren is! int) return false;
     return text == 0 && bodyChildren <= 1;
   }
+
+  /// The one line `dsh web` answers a request with when the browser session it
+  /// was given is gone. No HTML, no scripts — 67 characters of plain text.
+  ///
+  /// Mirrors `writeUnauthorized` in `@deepseek-ai/dsh-client-connection`.
+  static const String dshWebAuthRequired = 'dsh web authentication required';
+
+  /// True when the page is `dsh web`'s own "session rejected" body.
+  ///
+  /// Worth telling apart from every other bad page, because it is the one case
+  /// the app can repair by itself. `dsh-pocket` never produces this text: a
+  /// rejected access PIN gets the proxy's login page (HTTP 200, with a form),
+  /// and a computer that is off gets a connection error. So this text means the
+  /// phone *did* authenticate and the session cookie it is carrying was signed
+  /// by a **previous** `dsh web` process — every restart mints a new secret.
+  /// The proxy only re-runs the launch-token handshake while a request carries
+  /// no `dsh-auth-*` cookie, so that stale cookie locks the phone out until it
+  /// is dropped.
+  static bool isDshWebAuthRejection(Map<String, Object?>? probe) {
+    if (probe == null || probe['state'] != 'ok') return false;
+    final head = probe['textHead'];
+    return head is String && head.contains(dshWebAuthRequired);
+  }
 }
