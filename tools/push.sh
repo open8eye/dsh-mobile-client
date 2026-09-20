@@ -13,6 +13,13 @@
 # memory and forgets it after a while. 'libsecret' uses the desktop keyring,
 # if you have one.
 #
+# 'sh tools/push.sh' is a natural thing to type, and on Ubuntu /bin/sh is dash,
+# which has no 'pipefail'. The result is "set: Illegal option -o pipefail",
+# which says nothing about the actual problem. Re-exec under bash instead.
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec bash "$0" "$@"
+fi
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
