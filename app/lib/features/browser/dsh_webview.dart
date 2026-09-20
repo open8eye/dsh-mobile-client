@@ -1,16 +1,24 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/dsh/dsh_endpoint.dart';
+import '../../core/diagnostics/diagnostics.dart';
+import '../../core/diagnostics/diagnostics_report.dart';
+import '../../core/diagnostics/diagnostics_script.dart';
+import '../../core/diagnostics/log_entry.dart';
+import '../../core/diagnostics/redact.dart';
 import '../../core/i18n/l10n.dart';
 import '../../core/models/app_settings.dart';
 import '../../core/models/dsh_device.dart';
 import '../../core/notifications/notification_service.dart';
 import '../../core/notifications/web_notification_script.dart';
+import '../../core/platform/app_platform.dart';
 import '../../core/state/app_lifecycle.dart';
 
 /// Full-screen WebView onto one DSH server.
@@ -54,8 +62,27 @@ class DshWebView extends StatefulWidget {
 class DshWebViewState extends State<DshWebView> {
   InAppWebViewController? _controller;
   bool _loading = true;
-  String? _error;
   String? _pageTitle;
+
+  /// Why the page is unusable, if it is.
+  _Failure? _failure;
+
+  /// Raw technical detail behind [_failure] — an error description or a status
+  /// line. Shown verbatim because it is the part that actually diagnoses.
+  String? _detail;
+
+  /// Result of the last page probe, kept so the failure screen can attach it to
+  /// the report the user copies out.
+  Map<String, Object?>? _probe;
+
+  /// Guards against a page that never calls back at all. Without it the
+  /// progress bar spins forever and the user has nothing to report.
+  Timer? _loadTimeout;
+
+  /// A white screen is a page that loaded and painted nothing. It has no error
+  /// code and no exception, so it is detected by asking the page itself.
+  static const Duration _loadTimeoutAfter = Duration(seconds: 25);
+  static const Duration _blankSettleDelay = Duration(milliseconds: 1200);
 
   /// One automatic retry per page session: enough to recover a rotated cookie,
   /// not enough to loop forever against a wrong password.
@@ -79,11 +106,20 @@ class DshWebViewState extends State<DshWebView> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    // From here on the PIN cannot appear in a log line, a probe result or a
+    // report, no matter what the page echoes back at us.
+    Diagnostics.instance.registerSecret(widget.password);
+  }
+
+  @override
   void didUpdateWidget(DshWebView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    Diagnostics.instance.registerSecret(widget.password);
     if (oldWidget.device.id != widget.device.id) {
       _retriedWithStoredPassword = false;
-      _error = null;
+      _failure = null;
       _load(_entryUrl);
     } else if (oldWidget.password != widget.password) {
       // A password was just saved from the prompt: retry immediately.
@@ -95,11 +131,51 @@ class DshWebViewState extends State<DshWebView> {
   Future<void> _load(String url) async {
     final controller = _controller;
     if (controller == null) return;
+    // Redacted at the source: the entry URL carries the access PIN.
+    Diagnostics.instance.info('WebView', 'load ${Redact.url(url)}');
     setState(() {
       _loading = true;
-      _error = null;
+      _failure = null;
+      _detail = null;
+      _probe = null;
     });
+    _armTimeout();
     await controller.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+  }
+
+  void _armTimeout() {
+    _loadTimeout?.cancel();
+    _loadTimeout = Timer(_loadTimeoutAfter, () {
+      if (!mounted || !_loading) return;
+      Diagnostics.instance.warn(
+        'WebView',
+        'no load callback after ${_loadTimeoutAfter.inSeconds}s',
+      );
+      setState(() {
+        _loading = false;
+        _failure = _Failure.timeout;
+        _detail = null;
+      });
+    });
+  }
+
+  void _disarmTimeout() {
+    _loadTimeout?.cancel();
+    _loadTimeout = null;
+  }
+
+  /// Ask the page whether it actually rendered anything.
+  Future<Map<String, Object?>?> _probePage(InAppWebViewController controller) async {
+    try {
+      final raw = await controller.evaluateJavascript(source: DiagnosticsScript.probeSource);
+      if (raw is! String) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) return decoded.cast<String, Object?>();
+      return null;
+    } on Exception {
+      // A page mid-navigation cannot answer; that is not a finding.
+      return null;
+    }
   }
 
   /// Public so the host tab can offer a manual reload.
@@ -112,9 +188,62 @@ class DshWebViewState extends State<DshWebView> {
 
   Future<void> goHome() => _load(_entryUrl);
 
+  /// Throw away the cache and the session cookies, then reload.
+  ///
+  /// The escape hatch for a page that cached a broken response — the settings
+  /// above already note that a stale cache shows up as a blank page, and until
+  /// now the user had nothing to try when it did. Cookies are safe to drop:
+  /// the entry URL re-mints them from the stored PIN on the next request.
+  Future<void> hardReload() async {
+    Diagnostics.instance.info('WebView', 'hard reload: clearing cache and cookies');
+    try {
+      await InAppWebViewController.clearAllCache();
+      await CookieManager.instance().deleteAllCookies();
+    } on Exception {
+      // Best effort; reloading is still the right next step either way.
+    }
+    _retriedWithStoredPassword = false;
+    await _load(_entryUrl);
+  }
+
+  @override
+  void dispose() {
+    _disarmTimeout();
+    super.dispose();
+  }
+
   Future<void> _handleLoadStop(InAppWebViewController controller, WebUri? url) async {
     if (!mounted) return;
-    setState(() => _loading = false);
+    _disarmTimeout();
+    Diagnostics.instance.info('WebView', 'loaded ${Redact.url(url?.toString() ?? '')}');
+
+    var probe = await _probePage(controller);
+    if (!mounted) return;
+
+    // A framework can mount after the load event, so a blank document is only
+    // called blank once it has had a moment to paint.
+    if (probe != null && DiagnosticsScript.looksBlank(probe)) {
+      await Future<void>.delayed(_blankSettleDelay);
+      if (!mounted) return;
+      probe = await _probePage(controller) ?? probe;
+      if (!mounted) return;
+    }
+
+    final blank = probe != null && DiagnosticsScript.looksBlank(probe);
+    if (probe != null) {
+      Diagnostics.instance.log(
+        blank ? LogLevel.warn : LogLevel.debug,
+        'WebView',
+        DiagnosticsScript.describeProbe(probe),
+      );
+    }
+
+    setState(() {
+      _loading = false;
+      _probe = probe;
+      if (blank) _failure = _Failure.blank;
+    });
+
     try {
       final result = await controller.evaluateJavascript(
         source: WebNotificationScript.probeLoginForm,
@@ -125,6 +254,33 @@ class DshWebViewState extends State<DshWebView> {
     } on Exception {
       // A page that vanished mid-probe is not an error worth surfacing.
     }
+  }
+
+  void _handleConsoleMessage(InAppWebViewController controller, ConsoleMessage message) {
+    final level = switch (message.messageLevel) {
+      ConsoleMessageLevel.ERROR => LogLevel.error,
+      ConsoleMessageLevel.WARNING => LogLevel.warn,
+      _ => LogLevel.debug,
+    };
+    // ConsoleMessage carries only the text and the level; the source location
+    // is not exposed by the platform interface.
+    Diagnostics.instance.log(level, 'JS', message.message);
+  }
+
+  /// Diagnostics forwarded from the page's own error hooks.
+  ///
+  /// This is where an uncaught exception inside the DSH bundle surfaces — the
+  /// single most likely explanation for a page that loads and paints nothing.
+  void _handlePageDiagnostic(List<Object?> arguments) {
+    if (arguments.isEmpty) return;
+    final raw = arguments.first;
+    if (raw is! Map) return;
+    final level = switch (raw['level']?.toString()) {
+      'error' => LogLevel.error,
+      'warn' => LogLevel.warn,
+      _ => LogLevel.info,
+    };
+    Diagnostics.instance.log(level, 'Page', (raw['message'] ?? '').toString());
   }
 
   Future<void> _handleLoginRequired() async {
@@ -198,6 +354,12 @@ class DshWebViewState extends State<DshWebView> {
             userAgent: '',
           ),
           initialUserScripts: UnmodifiableListView<UserScript>(<UserScript>[
+            // First, so it is installed before the page's own bundles run and
+            // can catch their bootstrap failures.
+            UserScript(
+              source: DiagnosticsScript.source,
+              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            ),
             UserScript(
               source: WebNotificationScript.source,
               injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
@@ -212,17 +374,61 @@ class DshWebViewState extends State<DshWebView> {
                 return null;
               },
             );
+            controller.addJavaScriptHandler(
+              handlerName: DiagnosticsScript.handlerName,
+              callback: (arguments) {
+                _handlePageDiagnostic(arguments);
+                return null;
+              },
+            );
           },
           onLoadStart: (controller, url) {
-            if (mounted) setState(() => _loading = true);
+            if (mounted) {
+              setState(() {
+                _loading = true;
+                _failure = null;
+                _detail = null;
+              });
+            }
           },
           onLoadStop: _handleLoadStop,
+          onConsoleMessage: _handleConsoleMessage,
           onReceivedError: (controller, request, error) {
             if (!mounted) return;
+            final description = '${error.type}: ${error.description}';
+            Diagnostics.instance.error(
+              'WebView',
+              'error on ${Redact.url(request.url.toString())} — $description',
+            );
+            // Sub-resource failures are noise: a missing favicon must not
+            // replace a working page with an error screen.
             if (request.isForMainFrame != true) return;
+            _disarmTimeout();
             setState(() {
               _loading = false;
-              _error = error.description;
+              _failure = _Failure.network;
+              _detail = description;
+            });
+          },
+          // Not handled before, and it matters: a 401 from dsh-pocket still
+          // fires onLoadStop, so the old code cleared the spinner and showed a
+          // blank page with no explanation.
+          onReceivedHttpError: (controller, request, response) {
+            if (!mounted) return;
+            final status = response.statusCode;
+            final line = 'HTTP ${status ?? '?'} ${response.reasonPhrase ?? ''}'.trim();
+            Diagnostics.instance.error(
+              'WebView',
+              'http error on ${Redact.url(request.url.toString())} — $line',
+            );
+            if (request.isForMainFrame != true) return;
+            // 3xx and below are the WebView's own business.
+            if (status != null && status < 400) return;
+            _disarmTimeout();
+            setState(() {
+              _loading = false;
+              _failure = _Failure.http;
+              _detail = line;
             });
           },
           onTitleChanged: (controller, title) {
@@ -265,15 +471,18 @@ class DshWebViewState extends State<DshWebView> {
             top: 0,
             child: LinearProgressIndicator(minHeight: 2),
           ),
-        if (_error != null)
+        if (_failure != null)
           Positioned.fill(
             child: ColoredBox(
               color: Theme.of(context).colorScheme.surface,
-              child: _ErrorView(
-                message: _error!,
+              child: _FailureView(
+                failure: _failure!,
+                detail: _detail,
                 device: widget.device,
                 pageTitle: _pageTitle,
+                probe: _probe,
                 onRetry: () => _load(_entryUrl),
+                onHardReload: hardReload,
               ),
             ),
           ),
@@ -282,42 +491,171 @@ class DshWebViewState extends State<DshWebView> {
   }
 }
 
-class _ErrorView extends StatelessWidget {
-  const _ErrorView({
-    required this.message,
+/// Why a page is not usable.
+enum _Failure { timeout, network, http, blank }
+
+/// The screen shown instead of a blank page.
+///
+/// A white screen is the worst failure mode this app has: the user cannot tell
+/// a wrong address from a dead server from an obsolete WebView, and there is
+/// nothing to report. This replaces it with what went wrong, what to try, and a
+/// one-tap way to hand over the evidence.
+class _FailureView extends StatelessWidget {
+  const _FailureView({
+    required this.failure,
+    required this.detail,
     required this.device,
     required this.pageTitle,
+    required this.probe,
     required this.onRetry,
+    required this.onHardReload,
   });
 
-  final String message;
+  final _Failure failure;
+  final String? detail;
   final DshDevice device;
   final String? pageTitle;
+  final Map<String, Object?>? probe;
   final VoidCallback onRetry;
+  final VoidCallback onHardReload;
+
+  IconData get _icon => switch (failure) {
+        _Failure.timeout => Icons.hourglass_empty,
+        _Failure.network => Icons.cloud_off_outlined,
+        _Failure.http => Icons.error_outline,
+        _Failure.blank => Icons.visibility_off_outlined,
+      };
+
+  String _title(BuildContext context) => switch (failure) {
+        _Failure.timeout => context.tr('webFailTimeout'),
+        _Failure.network => context.tr('webFailNetwork'),
+        _Failure.http => context.tr('webFailHttp'),
+        _Failure.blank => context.tr('webFailBlank'),
+      };
+
+  /// Concrete things to try, not "something went wrong".
+  List<String> _hints(BuildContext context) => switch (failure) {
+        _Failure.timeout => <String>[context.tr('webFailTimeoutHint')],
+        _Failure.network => <String>[
+            context.tr('webFailNetworkHint1'),
+            context.tr('webFailNetworkHint2'),
+          ],
+        _Failure.http => <String>[
+            context.tr('webFailHttpHint1'),
+            context.tr('webFailHttpHint2'),
+          ],
+        _Failure.blank => <String>[
+            context.tr('webFailBlankHint1'),
+            context.tr('webFailBlankHint2'),
+            context.tr('webFailBlankHint3'),
+          ],
+      };
+
+  Future<void> _copyReport(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final copied = context.tr('diagnosticsCopied');
+    final failed = context.tr('diagnosticsCopyFailed');
+    try {
+      final report = await DiagnosticsReport.build(
+        activeDevice: device.baseUrl,
+        pageProbe: probe,
+      );
+      await Clipboard.setData(ClipboardData(text: report));
+      messenger.showSnackBar(SnackBar(content: Text(copied)));
+    } on Exception {
+      messenger.showSnackBar(SnackBar(content: Text(failed)));
+    }
+  }
+
+  Future<void> _shareReport(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final failed = context.tr('diagnosticsShareFailed');
+    try {
+      final report = await DiagnosticsReport.build(
+        activeDevice: device.baseUrl,
+        pageProbe: probe,
+      );
+      final subject = await DiagnosticsReport.subject();
+      final ok = await AppPlatform.shareText(text: report, subject: subject);
+      if (!ok) messenger.showSnackBar(SnackBar(content: Text(failed)));
+    } on Exception {
+      messenger.showSnackBar(SnackBar(content: Text(failed)));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Icon(Icons.cloud_off_outlined, size: 48, color: theme.colorScheme.outline),
-            const SizedBox(height: 16),
-            Text(context.tr('failed'), style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
+            Icon(_icon, size: 44, color: theme.colorScheme.outline),
+            const SizedBox(height: 14),
             Text(
-              '${device.address}\n$message',
+              _title(context),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              device.address,
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
             ),
-            const SizedBox(height: 20),
+            if (detail != null && detail!.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(top: 14),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SelectableText(
+                  detail!,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+                ),
+              ),
+            const SizedBox(height: 18),
+            for (final hint in _hints(context))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text('·  ', style: theme.textTheme.bodySmall),
+                    Expanded(
+                      child: Text(hint, style: theme.textTheme.bodySmall),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 18),
             FilledButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),
               label: Text(context.tr('retry')),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: onHardReload,
+              icon: const Icon(Icons.cleaning_services_outlined),
+              label: Text(context.tr('webFailHardReload')),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => _copyReport(context),
+              icon: const Icon(Icons.copy_all_outlined),
+              label: Text(context.tr('diagnosticsCopy')),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () => _shareReport(context),
+              icon: const Icon(Icons.ios_share),
+              label: Text(context.tr('diagnosticsShare')),
             ),
           ],
         ),

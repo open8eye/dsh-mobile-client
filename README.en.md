@@ -199,6 +199,29 @@ is in **[docs/RELEASING.md](docs/RELEASING.md)**.
 > Forking under your own account? Point the build at it with
 > `--dart-define=DSH_GITHUB_REPO=you/dsh-mobile-client --dart-define=DSH_GITEE_REPO=you/dsh-mobile-client`.
 
+## When a page is blank or a device will not connect
+
+This app has **no analytics and no crash reporting**, so when something breaks the only way
+forward is for you to send the diagnostics — everything needed to pin it down is in there.
+
+| Situation | What to do |
+|---|---|
+| **Cannot connect** | The page no longer goes blank; it names the cause (timeout / unreachable / refused / blank page) and suggests what to try. Tap "Copy diagnostics" |
+| **Any other time** | `Settings → Diagnostics`: read the log, copy it, share it, or jump straight to GitHub Issues |
+
+The report contains the device model, Android and **MIUI** versions, the **system WebView package
+and version**, the current device address, the page probe result, this run's and the previous
+run's logs, and any JavaScript exception or `console.error` captured from the page.
+
+> 🔒 **The access password and session cookie are removed automatically.** Every `?token=` value
+> becomes `<hidden>`, and the PIN itself is erased as a known secret wherever it appears — even
+> inside a page title or an error message. This is not optional: scrubbing happens where the log
+> is written, so a caller cannot forget it.
+>
+> It is also why the blank page deserved its own handling — it is the one failure where the page
+> loads successfully and paints nothing, with no error code and no exception, leaving the user
+> nothing at all to report.
+
 ## Building
 
 Requires Flutter 3.35+, the Android SDK (compileSdk 36) and JDK 17–23

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'app.dart';
+import 'core/diagnostics/diagnostics.dart';
 import 'core/notifications/notification_service.dart';
 import 'core/pet/pet_platform.dart';
 import 'core/state/app_lifecycle.dart';
@@ -14,6 +15,11 @@ import 'core/storage/settings_repository.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // First thing, so a failure during startup is already being recorded.
+  final diagnostics = Diagnostics.instance;
+  await diagnostics.load();
+  diagnostics.info('App', 'process started');
 
   final settings = SettingsController(repository: SettingsRepository());
   await settings.load();

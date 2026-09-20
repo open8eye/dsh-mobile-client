@@ -1,9 +1,11 @@
 package com.dshmobile.dsh_mobile_client
 
 import android.content.Intent
+import android.content.pm.PackageInfo
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.webkit.WebView
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -39,6 +41,31 @@ class MainActivity : FlutterActivity() {
                             openSystemScreen(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
                         }
                         result.success(null)
+                    }
+
+                    "deviceInfo" -> result.success(deviceInfo())
+
+                    "shareText" -> {
+                        val text = call.argument<String>("text")
+                        if (text == null) {
+                            result.error("bad_args", "shareText needs text", null)
+                            return@setMethodCallHandler
+                        }
+                        val subject = call.argument<String>("subject") ?: getString(R.string.app_name)
+                        try {
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, subject)
+                                putExtra(Intent.EXTRA_TEXT, text)
+                            }
+                            startActivity(
+                                Intent.createChooser(send, subject)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                            result.success(null)
+                        } catch (error: Exception) {
+                            result.error("share_failed", error.message, null)
+                        }
                     }
 
                     "installApk" -> {
@@ -110,6 +137,66 @@ class MainActivity : FlutterActivity() {
                 }
             }
     }
+
+    /**
+     * Facts a bug report needs.
+     *
+     * The WebView package matters most. On some OEM builds — MIUI in particular
+     * — the system WebView is missing, disabled or years out of date, and every
+     * page then renders white with no error surfaced anywhere. Nothing inside
+     * Dart can see that, so it has to be asked for here.
+     */
+    private fun deviceInfo(): Map<String, Any?> {
+        val webView = webViewPackage()
+        return linkedMapOf(
+            "manufacturer" to Build.MANUFACTURER,
+            "brand" to Build.BRAND,
+            "model" to Build.MODEL,
+            "device" to Build.DEVICE,
+            "androidRelease" to Build.VERSION.RELEASE,
+            "sdkInt" to Build.VERSION.SDK_INT,
+            "supportedAbis" to Build.SUPPORTED_ABIS.joinToString(","),
+            // OEM skins: MIUI only exposes its version as a system property, and
+            // hidden-API restrictions can block reading it. The build strings
+            // are a fallback that always works.
+            "miui" to systemProperty("ro.miui.ui.version.name"),
+            "buildDisplay" to Build.DISPLAY,
+            "incremental" to Build.VERSION.INCREMENTAL,
+            "webViewPackage" to (webView?.packageName ?: "missing"),
+            "webViewVersion" to (webView?.versionName ?: "unknown"),
+        )
+    }
+
+    @Suppress("DEPRECATION")
+    private fun webViewPackage(): PackageInfo? {
+        val current = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WebView.getCurrentWebViewPackage()
+            } else {
+                null
+            }
+        }.getOrNull()
+        if (current != null) return current
+
+        // Below Android 8, or when the current provider cannot be resolved:
+        // ask the known providers directly so "missing" can be told apart from
+        // "unknown".
+        val candidates = listOf(
+            "com.google.android.webview",
+            "com.android.webview",
+            "com.google.android.webview.beta",
+        )
+        return candidates.firstNotNullOfOrNull { name ->
+            runCatching { packageManager.getPackageInfo(name, 0) }.getOrNull()
+        }
+    }
+
+    /** Read a build property; returns null when hidden-API rules block it. */
+    private fun systemProperty(key: String): String? = runCatching {
+        val clazz = Class.forName("android.os.SystemProperties")
+        val get = clazz.getMethod("get", String::class.java)
+        (get.invoke(null, key) as? String)?.takeIf { it.isNotBlank() }
+    }.getOrNull()
 
     /** Open one of this app's pages in system settings. */
     private fun openSystemScreen(action: String): Boolean {

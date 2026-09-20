@@ -11,6 +11,7 @@ import '../../core/pet/pet_platform.dart';
 import '../../core/state/device_controller.dart';
 import '../../core/state/settings_controller.dart';
 import '../about/about_screen.dart';
+import '../diagnostics/diagnostics_screen.dart';
 import '../pet/companion_preview.dart';
 import 'settings_widgets.dart';
 import 'update_section.dart';
@@ -357,6 +358,16 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
             title: Text(context.tr('settingsClearPasswords')),
             trailing: const Icon(Icons.lock_reset_outlined),
             onTap: () => _clearPasswords(devices),
+          ),
+
+          ListTile(
+            leading: const Icon(Icons.monitor_heart_outlined),
+            title: Text(context.tr('diagnosticsTitle')),
+            subtitle: Text(context.tr('diagnosticsSettingsHint')),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const DiagnosticsScreen()),
+            ),
           ),
 
           const UpdateSection(),
