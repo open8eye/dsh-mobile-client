@@ -484,7 +484,11 @@ class _HomeShellState extends State<HomeShell> {
           onEditCurrentDevice: _openCurrentConfig,
           onDevices: () => setState(() => _page = _pageDevices),
           onSettings: () => setState(() => _page = _pageSettings),
-          onRefresh: current == null ? null : _reloadCurrent,
+          // Refreshing only means something while the current device is the
+          // thing on screen; on any other page it would reload something the
+          // user is not looking at.
+          showRefresh: _page == _pageSession && current != null,
+          onRefresh: _reloadCurrent,
         ),
       ),
     );
@@ -599,6 +603,7 @@ class _BottomBar extends StatelessWidget {
     required this.onEditCurrentDevice,
     required this.onDevices,
     required this.onSettings,
+    required this.showRefresh,
     required this.onRefresh,
   });
 
@@ -619,22 +624,33 @@ class _BottomBar extends StatelessWidget {
   final VoidCallback onEditCurrentDevice;
   final VoidCallback onDevices;
   final VoidCallback onSettings;
-  final VoidCallback? onRefresh;
+
+  /// Whether the refresh action is offered at all. It shares the name slot,
+  /// so the slot's total width is fixed and the icons beside it never move.
+  final bool showRefresh;
+  final VoidCallback onRefresh;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // A plain white bar, as asked for by hand. Dark mode keeps the themed
+    // surface instead: a white slab across the bottom of a dark app is not
+    // what white was meant to buy.
+    final background = theme.brightness == Brightness.light
+        ? const Color(0xFFFFFFFF)
+        : theme.colorScheme.surfaceContainer;
     return Material(
-      color: theme.colorScheme.surfaceContainer,
+      color: background,
       elevation: 3,
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 64,
+          height: 56,
           child: LayoutBuilder(
             builder: (context, constraints) {
-              // Six slots on a 320dp phone: 96 for the name would leave the
-              // icons less room than they need, so the name gives way first.
+              // Five icon slots plus the name group. On a 320dp phone a full
+              // 88dp name would leave the icons less room than they need, so
+              // the name gives way first.
               final room = constraints.maxWidth - _iconSlot * 5;
               final nameWidth = math.max(_iconSlot, math.min(_nameWidth, room));
               return Row(
@@ -653,15 +669,31 @@ class _BottomBar extends StatelessWidget {
                     badge: sessionCount,
                     onTap: onSessions,
                   ),
+                  // The name and its refresh action share one slot. The slot
+                  // keeps its width whether or not refresh is offered, so the
+                  // five icons around it stay where they are.
                   SizedBox(
-                    width: nameWidth,
-                    child: _NameSlot(
-                      name: currentName,
-                      tooltip: currentName == null
-                          ? context.tr('openDeviceList')
-                          : context.tr('deviceSlotHint'),
-                      onTap: onCurrentDevice,
-                      onLongPress: onEditCurrentDevice,
+                    width: nameWidth + _iconSlot,
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: _NameSlot(
+                            name: currentName,
+                            tooltip: currentName == null
+                                ? context.tr('openDeviceList')
+                                : context.tr('deviceSlotHint'),
+                            onTap: onCurrentDevice,
+                            onLongPress: onEditCurrentDevice,
+                          ),
+                        ),
+                        if (showRefresh)
+                          _BarAction(
+                            icon: Icons.refresh,
+                            tooltip: context.tr('refresh'),
+                            onTap: onRefresh,
+                            fixedWidth: _iconSlot,
+                          ),
+                      ],
                     ),
                   ),
                   _BarAction(
@@ -677,11 +709,6 @@ class _BottomBar extends StatelessWidget {
                     tooltip: context.tr('tabSettings'),
                     selected: page == 3,
                     onTap: onSettings,
-                  ),
-                  _BarAction(
-                    icon: Icons.refresh,
-                    tooltip: context.tr('refresh'),
-                    onTap: onRefresh,
                   ),
                 ],
               );
@@ -701,6 +728,7 @@ class _BarAction extends StatelessWidget {
     this.selectedIcon,
     this.selected = false,
     this.badge,
+    this.fixedWidth,
   });
 
   final IconData icon;
@@ -709,6 +737,11 @@ class _BarAction extends StatelessWidget {
   final VoidCallback? onTap;
   final bool selected;
   final int? badge;
+
+  /// When set, the action takes exactly this much width instead of an equal
+  /// share of the row. The name slot needs that: it is a row of two things
+  /// sitting in the middle of a row of five.
+  final double? fixedWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -732,31 +765,32 @@ class _BarAction extends StatelessWidget {
       iconWidget = Badge.count(count: count, child: iconWidget);
     }
 
-    return Expanded(
-      child: Tooltip(
-        message: tooltip,
-        child: InkResponse(
-          onTap: onTap,
-          radius: 30,
-          child: Center(
-            // A fixed box rather than padding: the indicator must never be
-            // wider than the slot it sits in, or six of them overflow.
-            child: Container(
-              width: 40,
-              height: 32,
-              alignment: Alignment.center,
-              decoration: selected
-                  ? BoxDecoration(
-                      color: theme.colorScheme.secondaryContainer,
-                      borderRadius: BorderRadius.circular(999),
-                    )
-                  : null,
-              child: iconWidget,
-            ),
+    final action = Tooltip(
+      message: tooltip,
+      child: InkResponse(
+        onTap: onTap,
+        radius: 30,
+        child: Center(
+          // A fixed box rather than padding: the indicator must never be
+          // wider than the slot it sits in, or the icons overflow.
+          child: Container(
+            width: 40,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: selected
+                ? BoxDecoration(
+                    color: theme.colorScheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(999),
+                  )
+                : null,
+            child: iconWidget,
           ),
         ),
       ),
     );
+
+    final width = fixedWidth;
+    return width == null ? Expanded(child: action) : SizedBox(width: width, child: action);
   }
 }
 
