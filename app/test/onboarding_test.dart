@@ -36,6 +36,27 @@ void main() {
       expect(OnboardingScript.source, contains("label === ''"));
     });
 
+    test('never clicks the language menu', () {
+      // It is the one other text button on the surface, and clicking it opens
+      // a dropdown instead of dismissing anything. The wizard marks it as a
+      // popup trigger, which is a stable, copy-free way to tell it apart.
+      expect(OnboardingScript.source, contains("getAttribute('aria-haspopup')"));
+    });
+
+    test('takes the footer action before searching the whole surface', () {
+      // Searching the surface first would reach the per-task "configure" and
+      // "skip" rows, and open a settings page mid-dismissal.
+      expect(OnboardingScript.source, contains("querySelector('footer')"));
+      expect(OnboardingScript.source, contains("querySelectorAll('h1')"));
+    });
+
+    test('reports what it saw through the diagnostics channel', () {
+      // Without this a miss is invisible: "no surface", "surface but not
+      // inert" and "surface with no matching button" need different fixes.
+      expect(OnboardingScript.source, contains('window.__dshLog'));
+      expect(OnboardingScript.source, contains('surface seen inert='));
+    });
+
     test('clicks any one label at most once', () {
       expect(OnboardingScript.source, contains(OnboardingScript.clickedAttribute));
       expect(OnboardingScript.source, contains('setAttribute(CLICKED, label)'));

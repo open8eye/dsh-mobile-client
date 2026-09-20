@@ -85,6 +85,10 @@ abstract final class DiagnosticsScript {
   send('info', 'origin=' + location.origin + ' secureContext=' + window.isSecureContext);
   send('info', 'userAgent=' + navigator.userAgent);
 
+  // Page-behaviour scripts run long after this hook, so they need a way back
+  // into the same buffered channel rather than one of their own.
+  window.__dshLog = send;
+
   // The compatibility shims run first and park their findings here, because
   // this hook is what owns the retry queue that can actually deliver them.
   try {
