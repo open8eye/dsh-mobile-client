@@ -57,5 +57,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: dsh-mobile-client-apk
-          path: app/build/app/outputs/flutter-apk/app-release.apk
+          # --flavor standard names the output after the flavour. Pointing at
+          # app-release.apk made every run fail here, with a green analyze,
+          # test and build behind it — which reads like flaky infrastructure
+          # rather than a wrong path.
+          path: app/build/app/outputs/flutter-apk/app-standard-release.apk
           if-no-files-found: error

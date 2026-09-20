@@ -4,6 +4,22 @@ import 'package:dsh_mobile_client/core/update/update_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  group('ReleaseChannels', () {
+    test('each host points at its own repository', () {
+      // These two differ on purpose, and getting either wrong fails *quietly*:
+      // the updater just reports that host as unreachable and leans on the
+      // other, so a dead channel looks exactly like a healthy one until the
+      // live channel is the one that breaks. 1.1.2 shipped that way.
+      expect(ReleaseChannels.githubRepo, 'open8eye/dsh-mobile-client');
+      expect(ReleaseChannels.giteeRepo, 'lulendi/dsh-mobile-client');
+      expect(
+        ReleaseChannels.githubRepo,
+        isNot(ReleaseChannels.giteeRepo),
+        reason: 'one default cannot serve two owners',
+      );
+    });
+  });
+
   group('UpdateException.isMissing', () {
     test('only a 404 counts as "nothing published"', () {
       // A 404 from a release API is an answer, not an outage: the repository

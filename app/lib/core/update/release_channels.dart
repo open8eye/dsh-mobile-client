@@ -18,8 +18,17 @@ enum UpdateSourcePreference {
 
 /// Repository coordinates for the two release hosts.
 ///
-/// Both default to the same owner/name; override them at build time when you
-/// publish under a different account:
+/// **The two owners are different, and that is not a typo.** The project is
+/// `open8eye/…` on GitHub and `lulendi/…` on Gitee, so there is no single
+/// default that fits both — each is spelled out.
+///
+/// Getting one wrong is quiet: the updater simply reports that host as
+/// unreachable and leans on the other, which looks like a working update
+/// check right up until the working host is the one that fails. That is
+/// exactly what happened in 1.1.2 — both hosts were wired to `lulendi/…`,
+/// so every published APK had exactly one live channel.
+///
+/// Override at build time if you publish elsewhere:
 ///
 /// ```
 /// flutter build apk --release \
@@ -27,12 +36,16 @@ enum UpdateSourcePreference {
 ///   --dart-define=DSH_GITEE_REPO=you/dsh-mobile-client
 /// ```
 ///
+/// CI passes `github.repository` for the GitHub half, so it only gets this
+/// wrong on the Gitee half — where the answer has to come from the
+/// `GITEE_REPO` repository variable.
+///
 /// The updater reads GitHub's and Gitee's public release APIs, so a public
 /// repository is required — a private one would answer 404 without a token,
 /// and shipping a token inside the app is not an option.
 abstract final class ReleaseChannels {
   static const String githubRepo =
-      String.fromEnvironment('DSH_GITHUB_REPO', defaultValue: 'lulendi/dsh-mobile-client');
+      String.fromEnvironment('DSH_GITHUB_REPO', defaultValue: 'open8eye/dsh-mobile-client');
 
   static const String giteeRepo =
       String.fromEnvironment('DSH_GITEE_REPO', defaultValue: 'lulendi/dsh-mobile-client');
