@@ -132,30 +132,25 @@ class DeviceController extends ChangeNotifier {
     await _persist();
   }
 
-  /// Change a device's address and/or password from the edit screen.
-  Future<String?> updateDevice(
+  /// Change a device's address and/or nickname from the edit screen.
+  ///
+  /// The access password is deliberately not editable here. It is captured by
+  /// the prompt at the moment the server asks for it, and forgotten through
+  /// [setPassword] with `null` — so nothing in this method can clobber it, and
+  /// the edit screen never has to be handed the secret in the first place.
+  Future<void> updateDevice(
     String deviceId, {
     required DshEndpoint endpoint,
     required String name,
-    String? password,
-    required bool passwordChanged,
   }) async {
     final existing = byId(deviceId);
-    if (existing == null) return null;
-    var hasPassword = existing.hasPassword;
-    if (passwordChanged) {
-      final failure = await setPassword(deviceId, password);
-      if (failure != null) return failure;
-      hasPassword = password != null && password.isNotEmpty;
-    }
+    if (existing == null) return;
     _replace(existing.copyWith(
       name: name.trim().isEmpty ? existing.name : name.trim(),
       baseUrl: endpoint.baseUrl,
       kind: endpoint.kind,
-      hasPassword: hasPassword,
     ));
     await _persist();
-    return null;
   }
 
   Future<void> remove(String deviceId) async {

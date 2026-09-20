@@ -9,25 +9,26 @@ class DeviceFormResult {
   const DeviceFormResult({
     required this.endpoint,
     required this.name,
-    required this.password,
-    required this.passwordChanged,
+    this.clearPassword = false,
   });
 
   final DshEndpoint endpoint;
   final String name;
 
-  /// `null` means "no password".
-  final String? password;
-
-  /// Whether the user actually edited the password field.
-  final bool passwordChanged;
+  /// The user asked to forget the access password stored for this device.
+  final bool clearPassword;
 }
 
 /// Add or edit one device.
+///
+/// Deliberately has **no password field**. The access password is asked for by
+/// a native prompt at the moment the server actually asks for it, which is also
+/// the only moment a wrong PIN can be told from a right one. A field here made
+/// the user type the same PIN twice — once into this form, and again when the
+/// session opened — and the second prompt was the honest one anyway.
 class DeviceEditScreen extends StatefulWidget {
   const DeviceEditScreen({
     this.device,
-    this.initialPassword,
     this.initialAddress,
     super.key,
   });
@@ -37,9 +38,6 @@ class DeviceEditScreen extends StatefulWidget {
 
   /// Pre-filled address when adding without a scan.
   final String? initialAddress;
-
-  /// Existing password, shown only as "already saved" — never rendered back.
-  final String? initialPassword;
 
   @override
   State<DeviceEditScreen> createState() => _DeviceEditScreenState();
@@ -52,21 +50,22 @@ class _DeviceEditScreenState extends State<DeviceEditScreen> {
   );
   late final TextEditingController _name =
       TextEditingController(text: widget.device?.name ?? '');
-  final TextEditingController _password = TextEditingController();
 
-  bool _passwordChanged = false;
-  bool _obscure = true;
+  /// Set once the user asks to forget the stored password. Only sent back on
+  /// save, so backing out of the screen changes nothing.
+  bool _clearPassword = false;
   String? _addressError;
 
   @override
   void dispose() {
     _address.dispose();
     _name.dispose();
-    _password.dispose();
     super.dispose();
   }
 
-  bool get _hasStoredPassword => (widget.initialPassword ?? '').isNotEmpty;
+  /// A device being added has no password yet; `DshDevice.hasPassword` is the
+  /// record of whether one is stored, so this screen never needs the secret.
+  bool get _hasStoredPassword => widget.device?.hasPassword ?? false;
 
   void _submit() {
     final address = _address.text.trim();
@@ -83,14 +82,14 @@ class _DeviceEditScreenState extends State<DeviceEditScreen> {
       DeviceFormResult(
         endpoint: endpoint,
         name: _name.text.trim(),
-        password: _password.text.trim().isEmpty ? null : _password.text.trim(),
-        passwordChanged: _passwordChanged,
+        clearPassword: _clearPassword,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final isEditing = widget.device != null;
     return Scaffold(
       appBar: AppBar(
@@ -128,52 +127,61 @@ class _DeviceEditScreenState extends State<DeviceEditScreen> {
                 border: const OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 20),
-            TextFormField(
-              controller: _password,
-              obscureText: _obscure,
-              autocorrect: false,
-              enableSuggestions: false,
-              decoration: InputDecoration(
-                labelText: context.tr('passwordLabel'),
-                hintText: _hasStoredPassword ? context.tr('passwordSaved') : context.tr('passwordHint'),
-                border: const OutlineInputBorder(),
-                helperText: context.tr('passwordHelp'),
-                helperMaxLines: 3,
-                suffixIcon: IconButton(
-                  icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
-                  onPressed: () => setState(() => _obscure = !_obscure),
-                ),
-              ),
-              onChanged: (_) => _passwordChanged = true,
-            ),
-            if (_hasStoredPassword && !_passwordChanged)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Row(
-                  children: <Widget>[
-                    const Icon(Icons.lock_outline, size: 16),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        context.tr('passwordSaved'),
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        setState(() {
-                          _passwordChanged = true;
-                          _password.clear();
-                        });
-                      },
-                      child: Text(context.tr('delete')),
-                    ),
-                  ],
-                ),
-              ),
+            const SizedBox(height: 24),
+            _buildPasswordRow(theme),
           ],
         ),
+      ),
+    );
+  }
+
+  /// What is stored, not what it is.
+  ///
+  /// The password itself is never rendered back and is not even passed into
+  /// this screen — a settings page is exactly where a secret ends up in a
+  /// screenshot.
+  Widget _buildPasswordRow(ThemeData theme) {
+    if (!_hasStoredPassword) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(Icons.lock_open_outlined, size: 18, color: theme.colorScheme.outline),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              context.tr('passwordNotSet'),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            _clearPassword ? Icons.lock_open_outlined : Icons.lock_outline,
+            size: 18,
+            color: theme.colorScheme.outline,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              context.tr(_clearPassword ? 'passwordWillClear' : 'passwordSaved'),
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          TextButton(
+            onPressed: () => setState(() => _clearPassword = !_clearPassword),
+            child: Text(context.tr(_clearPassword ? 'passwordUndoClear' : 'passwordClear')),
+          ),
+        ],
       ),
     );
   }

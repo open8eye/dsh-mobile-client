@@ -250,47 +250,46 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   /// Add/edit dialog. `device == null` adds; [initialAddress] pre-fills a scan.
-  Future<void> _openEditor({DshDevice? device, String? initialAddress, String? initialPassword}) async {
+  ///
+  /// The form has no password field, so nothing here reads the keystore: the
+  /// screen only needs to know *whether* a password is stored, which
+  /// [DshDevice.hasPassword] already records. The secret itself stays with the
+  /// prompt that captured it.
+  Future<void> _openEditor({DshDevice? device, String? initialAddress}) async {
     final devices = context.read<DeviceController>();
-    final existingPassword =
-        initialPassword ?? (device == null ? null : await devices.passwordFor(device.id));
-
-    if (!mounted) return;
     final result = await Navigator.of(context).push<DeviceFormResult>(
       MaterialPageRoute<DeviceFormResult>(
         builder: (_) => DeviceEditScreen(
           device: device,
           initialAddress: initialAddress,
-          initialPassword: existingPassword,
         ),
       ),
     );
     if (result == null || !mounted) return;
 
     if (device == null) {
-      final added = await devices.addFromEndpoint(
-        result.endpoint,
-        name: result.name,
-        password: result.password,
-      );
+      // A scan that carried `?token=` never reaches this form; it is added
+      // with its password already in hand by _onScanned.
+      final added = await devices.addFromEndpoint(result.endpoint, name: result.name);
       if (!mounted) return;
       await _openSession(added);
       if (mounted) _snack(context.tr('deviceAdded'));
       return;
     }
 
-    final failure = await devices.updateDevice(
-      device.id,
-      endpoint: result.endpoint,
-      name: result.name,
-      password: result.password,
-      passwordChanged: result.passwordChanged,
-    );
-    if (result.passwordChanged) {
-      setState(() => _passwords[device.id] = result.password);
+    await devices.updateDevice(device.id, endpoint: result.endpoint, name: result.name);
+    if (result.clearPassword) {
+      // After updateDevice, so the record it just wrote cannot put the flag
+      // back. The live session rebuilds with no password and lands on the
+      // login page, which is what clearing it is supposed to do.
+      await devices.setPassword(device.id, null);
+      if (!mounted) return;
+      setState(() => _passwords[device.id] = null);
+      _snack(context.tr('passwordCleared'));
+      return;
     }
     if (!mounted) return;
-    _snack(failure != null ? context.tr('passwordSaveFailed') : context.tr('deviceUpdated'));
+    _snack(context.tr('deviceUpdated'));
   }
 
   Future<void> _deleteDevice(DshDevice device) async {

@@ -106,6 +106,16 @@ class DshWebViewState extends State<DshWebView> {
   bool _retriedWithStoredPassword = false;
   bool _promptVisible = false;
 
+  /// The password the in-app prompt has already navigated with.
+  ///
+  /// Saving a password rebuilds this widget with a new [DshWebView.password],
+  /// and that rebuild would otherwise start a navigation of its own — a second
+  /// one, racing the navigation the prompt already began. Two navigations mean
+  /// two login-form probes, and the second probe can still catch the login page
+  /// and ask for the same PIN again. Recording what the prompt applied turns
+  /// that rebuild into a no-op.
+  String? _promptAppliedPassword;
+
   DshEndpoint get _endpoint =>
       DshEndpoint.tryParse(widget.device.baseUrl) ??
       DshEndpoint(baseUrl: widget.device.baseUrl, kind: widget.device.kind);
@@ -157,10 +167,17 @@ class DshWebViewState extends State<DshWebView> {
     Diagnostics.instance.registerSecret(widget.password);
     if (oldWidget.device.id != widget.device.id) {
       _retriedWithStoredPassword = false;
+      _promptAppliedPassword = null;
       _failure = null;
       _load(_entryUrl);
     } else if (oldWidget.password != widget.password) {
-      // A password was just saved from the prompt: retry immediately.
+      if (widget.password != null && widget.password == _promptAppliedPassword) {
+        // The prompt took this password and is already navigating with it.
+        _promptAppliedPassword = null;
+        return;
+      }
+      // The password changed somewhere else (the device config screen, or it
+      // was cleared): apply it now.
       _retriedWithStoredPassword = false;
       _load(_entryUrl);
     } else if (!oldWidget.isActive && widget.isActive) {
@@ -375,7 +392,12 @@ class DshWebViewState extends State<DshWebView> {
     );
     _promptVisible = false;
     if (entered == null || entered.isEmpty) return;
-    await widget.onPasswordEntered?.call(entered);
+    // Recorded before the save, because saving is what rebuilds this widget
+    // with the new password — and that rebuild must not navigate again.
+    // Without a callback nothing rebuilds, so there is nothing to suppress.
+    final onSaved = widget.onPasswordEntered;
+    _promptAppliedPassword = onSaved == null ? null : entered;
+    await onSaved?.call(entered);
     _retriedWithStoredPassword = true;
     await _load(_endpoint.authenticatedUrl(entered));
   }

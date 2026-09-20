@@ -116,8 +116,15 @@ Download the APK from [Releases](../../releases), or build it yourself (see belo
 
 1. Open the app, tap **Scan** in the bottom bar;
 2. Scan the **LAN QR code** on the Phone access page;
-3. The address is pre-filled — enter the **8-character access PIN** shown on the computer and save;
-4. From then on the app opens straight into DSH — **no more typing the PIN**.
+3. The address is pre-filled — give the device a nickname and save;
+4. When the page asks for the password, the app prompts for it — enter the **8-character PIN**
+   shown on the computer;
+5. From then on the app opens straight into DSH — **no more typing the PIN**.
+
+> The add/edit form has **no password field**, and that is deliberate. The password is asked
+> for at the moment you actually connect and the server actually asks — which is also the only
+> moment a wrong PIN can be told from a right one. Typing it into the form first, and again
+> when connecting, is the same job done twice.
 
 ### 4. Notifications and the companion
 
