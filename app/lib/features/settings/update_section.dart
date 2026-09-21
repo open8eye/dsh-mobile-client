@@ -78,6 +78,7 @@ class UpdateSection extends StatelessWidget {
       UpdatePhase.available => context.tr('settingsUpdateAvailable'),
       UpdatePhase.downloading => context.tr('settingsUpdateDownloading'),
       UpdatePhase.needsPermission => context.tr('settingsUpdateNeedsPermission'),
+      UpdatePhase.signatureMismatch => context.tr('settingsUpdateSignatureMismatch'),
       UpdatePhase.ready => context.tr('settingsUpdateReady'),
       UpdatePhase.error => switch (update.error) {
           null || 'noApk' => context.tr('settingsUpdateUnreachable'),
@@ -236,6 +237,44 @@ class UpdateSection extends StatelessWidget {
             child: Text(
               context.tr('settingsUpdateSignatureHint'),
               style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+            ),
+          ),
+        ];
+
+      // A dead end unless the user is told two things: why Android refuses,
+      // and where the file is. Uninstalling deletes our cache, so the copy in
+      // Downloads is the only thing that makes the instruction followable.
+      case UpdatePhase.signatureMismatch:
+        final saved = update.savedApkName;
+        return <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  context.tr('settingsUpdateSignatureMismatch'),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  saved == null
+                      ? context.tr('settingsUpdateSignatureNoCopy')
+                      : '${context.tr('settingsUpdateSignatureSaved')} $saved',
+                  style: theme.textTheme.bodySmall,
+                ),
+                if (saved == null) ...<Widget>[
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: update.shareDownloadedApk,
+                    icon: const Icon(Icons.share_outlined),
+                    label: Text(context.tr('settingsUpdateShareApk')),
+                  ),
+                ],
+              ],
             ),
           ),
         ];

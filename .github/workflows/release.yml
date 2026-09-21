@@ -16,6 +16,12 @@ jobs:
     env:
       GITEE_REPO: ${{ vars.GITEE_REPO }}
       GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+      # Refuse to publish an APK signed with the debug key. Every runner mints
+      # its own debug key, and Android will not install over an app signed by a
+      # different one — the user is asked to uninstall, which also costs them
+      # their device list and the access PIN. A release that cannot be installed
+      # as an update is not a release.
+      DSH_REQUIRE_RELEASE_SIGNING: 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,6 +61,38 @@ jobs:
         run: |
           flutter analyze
           flutter test
+
+      # The keystore is never committed. It travels as base64 in a secret and is
+      # written to the git-ignored app/android/key.properties, which
+      # app/build.gradle.kts reads. See docs/RELEASING.md §六.
+      - name: Set up release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] ||
+             [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::missing signing secrets — set ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD (docs/RELEASING.md §六)"
+            exit 1
+          fi
+
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+          # java.util.Properties treats a backslash as an escape character, so a
+          # password containing one would fail as "keystore was tampered with".
+          escape() { printf '%s' "$1" | sed 's/\\/\\\\/g'; }
+
+          {
+            printf 'storeFile=%s\n' "$RUNNER_TEMP/release.jks"
+            printf 'storePassword=%s\n' "$(escape "$KEYSTORE_PASSWORD")"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$(escape "$KEY_PASSWORD")"
+          } > app/android/key.properties
+
+          echo "signing keystore installed: $(wc -c < "$RUNNER_TEMP/release.jks") bytes"
 
       # Two builds from one codebase, published side by side. The in-app updater
       # tells them apart by name and never crosses them over.
@@ -104,6 +142,18 @@ jobs:
           cp app/build/app/outputs/flutter-apk/app-legacy-release.apk \
              "dist/${{ steps.version.outputs.legacy }}"
           ls -la dist
+
+      # The fingerprint belongs in the log: comparing it between releases is how
+      # "why is this update asking me to uninstall?" gets answered at a glance.
+      - name: Verify the release signature
+        run: |
+          set -euo pipefail
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          for apk in dist/*.apk; do
+            echo "--- $apk"
+            "$apksigner" verify --print-certs "$apk" |
+              grep -E 'Signer #1 certificate (DN|SHA-256)' || true
+          done
 
       - name: Write the release notes
         run: |

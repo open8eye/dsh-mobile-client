@@ -50,6 +50,11 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# --- Local notes -----------------------------------------------------------
+# Documents kept in the checkout for the maintainer only: a walkthrough of how
+# a release reaches both hosts, a scratch analysis. Not part of the project.
+*.local.md
+
 # --- Release artefacts -----------------------------------------------------
 *.apk
 *.aab

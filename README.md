@@ -425,9 +425,11 @@ cd app
 flutter build ios --release
 ```
 
-> 默认的 release 构建使用 debug 签名，方便直接 `flutter build apk --release`。
-> **正式分发前请换成你自己的签名**：在 `app/android/app/build.gradle.kts` 里配置
-> `signingConfigs`，并把 keystore 放在仓库外（`.gitignore` 已排除 `*.jks` / `*.keystore`）。
+> Release 构建的签名来自 `app/android/key.properties`，跑一次 `sh tools/setup-release-signing.sh`
+> 就会生成 keystore 并写好这个文件。没有它时会退回 debug 签名，而**这种包无法覆盖安装**：
+> Android 拒绝用不同密钥签名的包，用户只能先卸载——设备列表和存在系统 Keystore 里的访问
+> 密码都会一起丢掉。所以正式分发前务必配置。keystore 放在仓库外（`.gitignore` 已排除
+> `*.jks` / `*.keystore` / `key.properties`），细节见 `docs/RELEASING.md` 第六节。
 
 ### 应用图标
 

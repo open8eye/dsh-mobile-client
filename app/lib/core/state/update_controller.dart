@@ -24,6 +24,10 @@ enum UpdatePhase {
   /// The APK is on disk but Android still needs "install unknown apps".
   needsPermission,
 
+  /// Android will not install it over this app: the two are signed by
+  /// different keys, so the user has to uninstall first.
+  signatureMismatch,
+
   /// The APK has been handed to the package installer.
   ready,
   error,
@@ -41,6 +45,7 @@ class UpdateController extends ChangeNotifier {
   String? _error;
   double? _progress;
   File? _downloaded;
+  String? _savedApkName;
   bool _autoCheckDone = false;
 
   UpdatePhase get phase => _phase;
@@ -51,6 +56,11 @@ class UpdateController extends ChangeNotifier {
   /// 0..1 while downloading, or `null` when the server sent no length.
   double? get progress => _progress;
   File? get downloadedFile => _downloaded;
+
+  /// The name the APK was copied to in the phone's Downloads folder, when a
+  /// copy could be kept there. That copy outlives an uninstall; the one in
+  /// our cache does not.
+  String? get savedApkName => _savedApkName;
 
   @override
   void dispose() {
@@ -115,6 +125,7 @@ class UpdateController extends ChangeNotifier {
     _phase = UpdatePhase.downloading;
     _progress = 0;
     _error = null;
+    _savedApkName = null;
     notifyListeners();
 
     try {
@@ -133,18 +144,7 @@ class UpdateController extends ChangeNotifier {
         },
       );
       _downloaded = file;
-
-      if (!await AppPlatform.canInstallPackages()) {
-        // Android 8+ gates sideloading per app; the user has to grant it on a
-        // system screen and come back. The downloaded file is kept.
-        await AppPlatform.requestInstallPermission();
-        _phase = UpdatePhase.needsPermission;
-        notifyListeners();
-        return;
-      }
-
-      await AppPlatform.installApk(file.path);
-      _phase = UpdatePhase.ready;
+      await _handToInstaller(file);
     } on UpdateException catch (error) {
       _error = error.message;
       _phase = UpdatePhase.error;
@@ -155,13 +155,41 @@ class UpdateController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Hand the downloaded file to Android, unless it can only end in a refusal.
+  ///
+  /// An APK signed by a different key cannot be installed over this app, and
+  /// the system's own error says nothing about the file disappearing the
+  /// moment the user uninstalls to satisfy it. Checking first turns a dead end
+  /// into an instruction.
+  Future<void> _handToInstaller(File file) async {
+    if (await AppPlatform.apkSignerMatchesInstalled(file.path) == false) {
+      // Only now is a copy worth keeping, and only a public one will do:
+      // Android deletes our private cache along with the app, and this is
+      // the one case that ends in an uninstall. Best effort — a platform
+      // that refuses costs the convenience, not the update.
+      _savedApkName = await AppPlatform.exportApkToDownloads(file.path);
+      _phase = UpdatePhase.signatureMismatch;
+      return;
+    }
+
+    if (!await AppPlatform.canInstallPackages()) {
+      // Android 8+ gates sideloading per app; the user has to grant it on a
+      // system screen and come back. The downloaded file is kept.
+      await AppPlatform.requestInstallPermission();
+      _phase = UpdatePhase.needsPermission;
+      return;
+    }
+
+    await AppPlatform.installApk(file.path);
+    _phase = UpdatePhase.ready;
+  }
+
   /// Retry the hand-off after the user granted the permission.
   Future<void> installDownloaded() async {
     final file = _downloaded;
     if (file == null) return;
     try {
-      await AppPlatform.installApk(file.path);
-      _phase = UpdatePhase.ready;
+      await _handToInstaller(file);
       _error = null;
     } on Exception catch (error) {
       _error = error.toString();
@@ -170,10 +198,22 @@ class UpdateController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Send the downloaded APK out through the share sheet.
+  ///
+  /// Offered when no copy could be kept in Downloads (Android 9 and older), so
+  /// the user can still put the file somewhere that survives the uninstall the
+  /// system is asking for.
+  Future<void> shareDownloadedApk() async {
+    final file = _downloaded;
+    if (file == null) return;
+    await AppPlatform.shareApk(file.path);
+  }
+
   void reset() {
     _phase = UpdatePhase.idle;
     _error = null;
     _progress = null;
+    _savedApkName = null;
     notifyListeners();
   }
 }

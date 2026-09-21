@@ -1,9 +1,51 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// Release signing — see docs/RELEASING.md §六.
+//
+// Falling back to the debug key is not a cosmetic detail: every machine, and
+// every CI run, mints its own debug key, so each published APK is signed
+// differently from the last one. Android refuses to install over an app signed
+// by another key, and the user is then told to uninstall — which also throws
+// away their device list and the access PIN held in the platform keystore.
+//
+// `key.properties` (git-ignored, in this directory) points at a keystore kept
+// outside the repository; CI writes it from secrets before building. Tag builds
+// set DSH_REQUIRE_RELEASE_SIGNING=true so a release can never quietly ship
+// debug-signed again.
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("key.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
+val signingKeys = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+val missingSigningKeys = signingKeys.filter { keystoreProperties.getProperty(it).isNullOrBlank() }
+if (keystoreProperties.isNotEmpty() && missingSigningKeys.isNotEmpty()) {
+    throw GradleException(
+        "app/android/key.properties is incomplete: missing " +
+            missingSigningKeys.joinToString(", ") + ". See docs/RELEASING.md §六.",
+    )
+}
+
+val releaseKeystore = keystoreProperties.getProperty("storeFile")
+val requireReleaseSigning =
+    System.getenv("DSH_REQUIRE_RELEASE_SIGNING")?.equals("true", ignoreCase = true) == true
+if (releaseKeystore == null && requireReleaseSigning) {
+    throw GradleException(
+        "DSH_REQUIRE_RELEASE_SIGNING=true but app/android/key.properties is missing. " +
+            "A release signed with the debug key cannot be installed over the previous " +
+            "one. See docs/RELEASING.md §六.",
+    )
+}
+
+// Only worth saying when this invocation can actually produce a release APK.
+val buildingRelease = gradle.startParameter.taskNames.any { it.contains("release", true) }
 
 android {
     namespace = "com.dshmobile.dsh_mobile_client"
@@ -60,12 +102,31 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = rootProject.file(releaseKeystore)
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // Signed with the debug key so `flutter build apk --release` works
-            // out of the box. Replace this with a real signing config before
-            // publishing; the README explains how.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (releaseKeystore != null) {
+                signingConfigs.getByName("release")
+            } else {
+                if (buildingRelease) {
+                    logger.warn(
+                        "!! Release builds are signed with the DEBUG key, so this APK will " +
+                            "not install over an existing one. Put a keystore in " +
+                            "app/android/key.properties — see docs/RELEASING.md §六.",
+                    )
+                }
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

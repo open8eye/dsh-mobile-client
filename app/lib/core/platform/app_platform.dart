@@ -146,4 +146,53 @@ class AppPlatform {
   static Future<void> installApk(String path) async {
     await _channel.invokeMethod<void>('installApk', <String, Object?>{'path': path});
   }
+
+  /// Whether the APK at [path] is signed by the key that signed this app.
+  ///
+  /// Android refuses the install when it is not, and the only way out is to
+  /// uninstall — which deletes the downloaded APK if it is still in our
+  /// private cache. Knowing this before the hand-off is what lets the UI say
+  /// where a copy that survives an uninstall can be found.
+  ///
+  /// `null` means "could not tell", and the caller should simply try.
+  static Future<bool?> apkSignerMatchesInstalled(String path) async {
+    try {
+      return await _channel.invokeMethod<bool>('apkSignerMatchesInstalled', <String, Object?>{
+        'path': path,
+      });
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  /// Copy the downloaded APK into the phone's public Downloads collection.
+  ///
+  /// Returns the name it was saved under, or null when this platform has no
+  /// permission-free way to do it (Android 9 and older, iOS).
+  static Future<String?> exportApkToDownloads(String path) async {
+    try {
+      return await _channel.invokeMethod<String>('exportApk', <String, Object?>{'path': path});
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  /// Send the APK out through the system share sheet.
+  ///
+  /// The escape hatch on Android 9 and older: the user can put the file
+  /// somewhere that survives an uninstall before uninstalling.
+  static Future<bool> shareApk(String path) async {
+    try {
+      await _channel.invokeMethod<void>('shareApk', <String, Object?>{'path': path});
+      return true;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
 }

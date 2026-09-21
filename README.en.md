@@ -427,10 +427,13 @@ cd app
 flutter build ios --release
 ```
 
-> Release builds are signed with the debug key so that `flutter build apk --release` works out
-> of the box. **Configure your own signing before distributing**: add a `signingConfigs` block in
-> `app/android/app/build.gradle.kts` and keep the keystore outside the repository
-> (`.gitignore` already excludes `*.jks` and `*.keystore`).
+> Release builds are signed with the keystore that `app/android/key.properties` points at;
+> `sh tools/setup-release-signing.sh` generates it and writes that file. Without it the build
+> falls back to the debug key, and **such an APK cannot be installed over an existing app**:
+> Android refuses a package signed by a different key, so the user has to uninstall first and
+> loses their device list and the access PIN held in the platform keystore. Configure it before
+> distributing. The keystore lives outside the repository (`.gitignore` already excludes
+> `*.jks`, `*.keystore` and `key.properties`); see `docs/RELEASING.md` section 6.
 
 ## Security and privacy
 
