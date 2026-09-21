@@ -158,8 +158,15 @@ jobs:
       - name: Write the release notes
         run: |
           set -euo pipefail
-          # An annotated tag carries hand-written notes; a lightweight tag falls
-          # back to the commit message, which is better than nothing.
+          # The annotated tag carries the hand-written notes, and those are what
+          # the app shows as "release notes". actions/checkout materialises the
+          # pushed tag as a *lightweight* one, whose %(contents) is the commit
+          # message — so re-fetch the tag object itself first. v1.1.2 through
+          # v1.1.5 all shipped the commit message (trailers and all) because of
+          # this. The fetch may fail: falling back to the commit message is what
+          # happened before, and it must not take the whole release down.
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" ||
+            echo "::warning::could not re-fetch the tag object; using the commit message"
           git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > dist/notes.md
           if [ ! -s dist/notes.md ]; then
             echo "Release $GITHUB_REF_NAME" > dist/notes.md
